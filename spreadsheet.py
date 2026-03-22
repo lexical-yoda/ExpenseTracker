@@ -2,45 +2,43 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import os
+import json
 from datetime import date, datetime
 from collections import defaultdict
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-XLSX_PATH = os.environ.get('EXPENSES_XLSX', os.path.join(os.path.dirname(__file__), 'expenses.xlsx'))
+DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+XLSX_PATH = os.environ.get('EXPENSES_XLSX', os.path.join(DATA_DIR, 'expenses.xlsx'))
+ACCOUNTS_FILE = os.path.join(DATA_DIR, 'accounts.json')
 
+# Column layout stays the same physically for backward compat with existing sheets.
+# Columns I/J/K (balance columns) are no longer read or written — balances are
+# computed on the fly from accounts.json + transaction history.
 COLUMNS = {
     'date': 1,          # A
     'txn_id': 2,        # B
     'description': 3,   # C
     'category': 4,      # D
     'sub_category': 5,  # E
-    'account': 6,       # F
+    'account': 6,       # F — stores full account name
     'amount': 7,        # G
     'parent_id': 8,     # H
-    'savings_bal': 9,   # I
-    'cc_accum': 10,     # J
-    'cc_remaining': 11, # K
+    'txn_type': 12,     # L — kept at column 12 for backward compat
 }
 
-HEADER_ROW = 1   # "Credit Card Limit" label
-DATA_ROW = 2     # "Opening Savings Balance" label
-TABLE_START = 4  # Column headers row
-DATA_START = 5   # First transaction row
-
-CC_LIMIT_COL = 2      # B1
-OPENING_BAL_COL = 2   # B2
+TABLE_START = 1  # Column headers row
+DATA_START = 2   # First transaction row
 
 
 # ── Workbook helpers ───────────────────────────────────────────────────────────
 
-def load_workbook():
+def load_workbook(data_only=False):
     if not os.path.exists(XLSX_PATH):
         wb = openpyxl.Workbook()
-        # Default sheet will be removed when first month sheet is created
         wb.active.title = '_init'
         wb.save(XLSX_PATH)
-    return openpyxl.load_workbook(XLSX_PATH)
+    return openpyxl.load_workbook(XLSX_PATH, data_only=data_only)
 
 
 def save_workbook(wb):
@@ -62,7 +60,6 @@ def ensure_month_sheet(year=None, month=None):
     if name not in wb.sheetnames:
         ws = wb.create_sheet(name)
         _init_sheet(ws)
-        # Remove placeholder sheet if it exists
         if '_init' in wb.sheetnames:
             del wb['_init']
         save_workbook(wb)
@@ -76,27 +73,19 @@ def _init_sheet(ws):
     thin = Side(style='thin')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # Meta rows
-    ws['A1'] = 'Credit Card Limit'
-    ws['A2'] = 'Opening Savings Balance'
-    ws['B1'] = 0
-    ws['B2'] = 0
-
-    for cell in [ws['A1'], ws['A2']]:
-        cell.font = Font(bold=True)
-
-    # Column headers row (row 4)
     headers = ['Date', 'Txn ID', 'Description', 'Category', 'Sub-Category',
-               'Account', 'Amount (₹)', 'Parent ID', 'Savings Balance', 'CC Accumulated', 'CC Remaining']
+               'Account', 'Amount (₹)', 'Parent ID', '', '', '', 'Type']
+    widths = [12, 8, 28, 16, 16, 24, 14, 10, 1, 1, 1, 10]
+
     for col, header in enumerate(headers, start=1):
+        if not header:
+            continue
         cell = ws.cell(row=TABLE_START, column=col, value=header)
         cell.font = Font(bold=True, color='FFFFFF')
         cell.fill = PatternFill(fill_type='solid', fgColor='1a1a2e')
         cell.alignment = Alignment(horizontal='center')
         cell.border = border
 
-    # Column widths
-    widths = [12, 8, 28, 16, 16, 14, 14, 10, 16, 16, 16]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -115,17 +104,24 @@ def get_next_txn_id(wb):
     return max_id + 1
 
 
+def sanitize_cell(value):
+    """Prevent formula injection in spreadsheet cells."""
+    if isinstance(value, str) and value and value[0] in ('=', '+', '-', '@'):
+        return "'" + value
+    return value
+
+
 # ── Read ───────────────────────────────────────────────────────────────────────
 
 def parse_row(row, sheet_name):
     """Convert a raw openpyxl row tuple to a dict."""
     def val(col_name):
-        v = row[COLUMNS[col_name] - 1]
-        return v
+        idx = COLUMNS[col_name] - 1
+        return row[idx] if idx < len(row) else None
 
     txn_id = val('txn_id')
     if not isinstance(txn_id, int):
-        return None  # skip header/empty rows
+        return None
 
     date_val = val('date')
     if isinstance(date_val, datetime):
@@ -134,6 +130,8 @@ def parse_row(row, sheet_name):
         date_str = date_val.strftime('%Y-%m-%d')
     else:
         date_str = str(date_val) if date_val else ''
+
+    txn_type = val('txn_type')
 
     return {
         'id': txn_id,
@@ -144,16 +142,14 @@ def parse_row(row, sheet_name):
         'account': val('account') or '',
         'amount': float(val('amount') or 0),
         'parent_id': val('parent_id'),
-        'savings_bal': val('savings_bal'),
-        'cc_accum': val('cc_accum'),
-        'cc_remaining': val('cc_remaining'),
+        'type': txn_type or 'Expense',
         'sheet': sheet_name,
     }
 
 
 def get_all_transactions():
     """Return all transactions across all sheets, sorted by date desc."""
-    wb = load_workbook()
+    wb = load_workbook(data_only=True)
     transactions = []
     for name in wb.sheetnames:
         ws = wb[name]
@@ -166,7 +162,7 @@ def get_all_transactions():
 
 
 def get_transaction_by_id(txn_id):
-    wb = load_workbook()
+    wb = load_workbook(data_only=True)
     for name in wb.sheetnames:
         ws = wb[name]
         for row in ws.iter_rows(min_row=DATA_START, values_only=True):
@@ -176,89 +172,157 @@ def get_transaction_by_id(txn_id):
     return None
 
 
-def get_header_info(ws):
-    cc_limit = ws.cell(row=HEADER_ROW, column=CC_LIMIT_COL).value or 0
-    opening_bal = ws.cell(row=DATA_ROW, column=OPENING_BAL_COL).value or 0
-    return float(cc_limit), float(opening_bal)
-
-
 # ── Write ──────────────────────────────────────────────────────────────────────
 
-def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None):
+def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense'):
     """Append a transaction to the correct month sheet. Returns txn_id."""
     d = datetime.strptime(date_str, '%Y-%m-%d').date()
     wb, ws = ensure_month_sheet(d.year, d.month)
-    cc_limit, opening_bal = get_header_info(ws)
 
     txn_id = get_next_txn_id(wb)
-    ws_fresh = wb[month_sheet_name(d.year, d.month)]
+    sheet_name = month_sheet_name(d.year, d.month)
+    ws_fresh = wb[sheet_name]
 
     # Find next empty row
     next_row = DATA_START
     while ws_fresh.cell(row=next_row, column=COLUMNS['txn_id']).value is not None:
         next_row += 1
 
-    # Calculate running balances
-    savings_bal = None
-    cc_accum = None
-    cc_remaining = None
-
-    # Collect existing parent rows for balance calculations
-    parent_transactions = []
-    for row in ws_fresh.iter_rows(min_row=DATA_START, max_row=next_row - 1, values_only=True):
-        p = parse_row(row, '')
-        if p and p['parent_id'] is None:
-            parent_transactions.append(p)
-
-    is_parent = (parent_id is None)
-
-    if is_parent:
-        # Savings balance calculation
-        prev_savings = opening_bal
-        for t in parent_transactions:
-            if t['savings_bal'] is not None:
-                prev_savings = float(t['savings_bal'])
-
-        if account == 'Savings':
-            savings_bal = prev_savings - amount
-        else:
-            savings_bal = prev_savings  # CC doesn't change savings
-
-        # CC accumulated
-        prev_cc = 0
-        for t in parent_transactions:
-            if t['cc_accum'] is not None:
-                prev_cc = float(t['cc_accum'])
-
-        if account == 'Credit Card':
-            cc_accum = prev_cc + amount
-        else:
-            cc_accum = prev_cc
-
-        cc_remaining = cc_limit - cc_accum if cc_limit else None
-
     # Write row
     ws_fresh.cell(row=next_row, column=COLUMNS['date']).value = d
     ws_fresh.cell(row=next_row, column=COLUMNS['txn_id']).value = txn_id
-    ws_fresh.cell(row=next_row, column=COLUMNS['description']).value = description
-    ws_fresh.cell(row=next_row, column=COLUMNS['category']).value = category
-    ws_fresh.cell(row=next_row, column=COLUMNS['sub_category']).value = sub_category or ''
-    ws_fresh.cell(row=next_row, column=COLUMNS['account']).value = account
+    ws_fresh.cell(row=next_row, column=COLUMNS['description']).value = sanitize_cell(description)
+    ws_fresh.cell(row=next_row, column=COLUMNS['category']).value = sanitize_cell(category)
+    ws_fresh.cell(row=next_row, column=COLUMNS['sub_category']).value = sanitize_cell(sub_category or '')
+    ws_fresh.cell(row=next_row, column=COLUMNS['account']).value = sanitize_cell(account)
     ws_fresh.cell(row=next_row, column=COLUMNS['amount']).value = amount
     ws_fresh.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
-
-    if savings_bal is not None:
-        ws_fresh.cell(row=next_row, column=COLUMNS['savings_bal']).value = round(savings_bal, 2)
-    if cc_accum is not None:
-        ws_fresh.cell(row=next_row, column=COLUMNS['cc_accum']).value = round(cc_accum, 2)
-    if cc_remaining is not None:
-        ws_fresh.cell(row=next_row, column=COLUMNS['cc_remaining']).value = round(cc_remaining, 2)
-
-    # Format amount cell
+    ws_fresh.cell(row=next_row, column=COLUMNS['txn_type']).value = txn_type
     ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
 
     save_workbook(wb)
     return txn_id
+
+
+# ── Find / Edit / Delete ──────────────────────────────────────────────────────
+
+def find_transaction_row(wb, txn_id):
+    """Find the sheet name and row number for a given txn_id."""
+    for name in wb.sheetnames:
+        ws = wb[name]
+        for row_num in range(DATA_START, ws.max_row + 1):
+            if ws.cell(row=row_num, column=COLUMNS['txn_id']).value == txn_id:
+                return (name, row_num)
+    return None
+
+
+def update_transaction(txn_id, data):
+    """Update a transaction in place. Returns updated dict."""
+    wb = load_workbook()
+    result = find_transaction_row(wb, txn_id)
+    if not result:
+        raise ValueError(f'Transaction {txn_id} not found')
+
+    sheet_name, row_num = result
+    ws = wb[sheet_name]
+
+    old_date = ws.cell(row=row_num, column=COLUMNS['date']).value
+    new_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
+    if isinstance(old_date, datetime):
+        old_date = old_date.date()
+
+    if (old_date.year, old_date.month) != (new_date.year, new_date.month):
+        raise ValueError('Cannot change date to a different month. Delete and re-add instead.')
+
+    ws.cell(row=row_num, column=COLUMNS['date']).value = new_date
+    ws.cell(row=row_num, column=COLUMNS['description']).value = sanitize_cell(data['description'])
+    ws.cell(row=row_num, column=COLUMNS['category']).value = sanitize_cell(data['category'])
+    ws.cell(row=row_num, column=COLUMNS['sub_category']).value = sanitize_cell(data.get('sub_category', ''))
+    ws.cell(row=row_num, column=COLUMNS['account']).value = sanitize_cell(data['account'])
+    ws.cell(row=row_num, column=COLUMNS['amount']).value = float(data['amount'])
+    ws.cell(row=row_num, column=COLUMNS['amount']).number_format = '₹#,##0.00'
+    ws.cell(row=row_num, column=COLUMNS['txn_type']).value = data.get('type', 'Expense')
+
+    save_workbook(wb)
+    return get_transaction_by_id(txn_id)
+
+
+def delete_transaction(txn_id):
+    """Delete a transaction. If parent, also deletes all sub-items."""
+    wb = load_workbook()
+    result = find_transaction_row(wb, txn_id)
+    if not result:
+        raise ValueError(f'Transaction {txn_id} not found')
+
+    sheet_name, row_num = result
+    ws = wb[sheet_name]
+
+    parent_id = ws.cell(row=row_num, column=COLUMNS['parent_id']).value
+    rows_to_delete = [row_num]
+    deleted_ids = [txn_id]
+
+    if parent_id is None:
+        for r in range(DATA_START, ws.max_row + 1):
+            if r == row_num:
+                continue
+            pid = ws.cell(row=r, column=COLUMNS['parent_id']).value
+            if pid == txn_id:
+                rows_to_delete.append(r)
+                deleted_ids.append(ws.cell(row=r, column=COLUMNS['txn_id']).value)
+
+    for r in sorted(rows_to_delete, reverse=True):
+        ws.delete_rows(r, 1)
+
+    save_workbook(wb)
+    return deleted_ids
+
+
+# ── Account operations ────────────────────────────────────────────────────────
+
+def rename_account_in_sheets(old_name, new_name):
+    """Rename an account across all transaction sheets."""
+    wb = load_workbook()
+    changed = False
+    for name in wb.sheetnames:
+        ws = wb[name]
+        for row_num in range(DATA_START, ws.max_row + 1):
+            cell = ws.cell(row=row_num, column=COLUMNS['account'])
+            if cell.value == old_name:
+                cell.value = new_name
+                changed = True
+    if changed:
+        save_workbook(wb)
+
+
+def compute_account_balances():
+    """Compute current balance for each account from accounts.json + transactions."""
+    with open(ACCOUNTS_FILE, 'r') as f:
+        accounts = json.load(f)
+
+    transactions = get_all_transactions()
+    parents = [t for t in transactions if not t['parent_id']]
+
+    spend_by_account = defaultdict(float)
+    income_by_account = defaultdict(float)
+    for t in parents:
+        if t['type'] == 'Income':
+            income_by_account[t['account']] += t['amount']
+        else:
+            spend_by_account[t['account']] += t['amount']
+
+    result = []
+    for acct in accounts:
+        name = acct['name']
+        spent = spend_by_account.get(name, 0)
+        earned = income_by_account.get(name, 0)
+        if acct['type'] == 'savings':
+            current = acct['balance'] - spent + earned
+            result.append({**acct, 'current_balance': round(current, 2)})
+        elif acct['type'] == 'credit':
+            accumulated = spent - earned
+            remaining = acct['limit'] - accumulated
+            result.append({**acct, 'accumulated': round(accumulated, 2), 'remaining': round(remaining, 2)})
+    return result
 
 
 # ── Summary for dashboard ──────────────────────────────────────────────────────
@@ -266,7 +330,6 @@ def add_transaction(date_str, description, category, sub_category, account, amou
 def get_monthly_summary():
     """Return structured data for Plotly dashboard."""
     transactions = get_all_transactions()
-    # Only parent transactions for charts (avoid double-counting)
     parents = [t for t in transactions if not t['parent_id']]
 
     monthly = defaultdict(lambda: defaultdict(float))
@@ -275,7 +338,7 @@ def get_monthly_summary():
     by_account = defaultdict(float)
 
     for t in parents:
-        month = t['date'][:7]  # YYYY-MM
+        month = t['date'][:7]
         monthly[month][t['category']] += t['amount']
         daily[t['date']] += t['amount']
         by_category[t['category']] += t['amount']
@@ -286,5 +349,5 @@ def get_monthly_summary():
         'daily': dict(sorted(daily.items())),
         'by_category': dict(sorted(by_category.items(), key=lambda x: -x[1])),
         'by_account': dict(by_account),
-        'transactions': parents[:50],  # recent 50 for table
+        'transactions': parents[:50],
     }

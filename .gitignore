@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Data (back up this folder to migrate)
+data/
+
+# Environment
+.env

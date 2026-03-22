@@ -1,133 +1,123 @@
-# kharcha — Personal Expense Tracker
+# Expense Manager
 
-Flask-based expense tracker with mobile-friendly frontend.
-Runs on **redfive** (`10.0.1.10:5000`), WireGuard-only.
-Stores data in an `.xlsx` file on TrueNAS.
+A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data store, and multi-account support. Features 7 color themes, Plotly charts, CSRF protection, and full CRUD for transactions.
 
 ---
 
-## Setup on redfive
+## Features
 
-### 1. Mount TrueNAS share
+- Multiple named accounts (savings & credit cards) with live balance tracking
+- Income and expense tracking
+- Sub-expense support — break down a transaction into individual items
+- Category & sub-category management from the frontend
+- Dashboard with spending charts, stat cards, and account balances
+- 7 color themes (GitHub, Indigo, Nord, Emerald, Rose, Amber, Ocean) with dark/light modes
+- Login authentication with bcrypt, rate limiting, and CSRF protection
+- First-time setup wizard — creates login, accounts, and categories
+- Mobile-responsive layout
+- Custom date range filtering on the dashboard
 
-Add to `/etc/fstab` (adjust path to your TrueNAS SMB share):
+---
 
-```
-//192.168.1.20/lexishare/expenses  /mnt/expenses  cifs  credentials=/etc/smb-credentials,uid=1000,gid=1000,iocharset=utf8  0  0
-```
+## Pages
 
-Create credentials file at `/etc/smb-credentials`:
-```
-username=lexishare
-password=YOUR_PASSWORD
-```
+| URL | Purpose |
+|-----|---------|
+| `/` | Redirects to dashboard |
+| `/setup` | First-time setup (create login & accounts) |
+| `/login` | Sign in |
+| `/dashboard` | Charts, stats & spending summary (home page) |
+| `/manage` | Add transactions + transaction list with edit/delete |
+| `/accounts` | Manage accounts |
 
-Then: `sudo chmod 600 /etc/smb-credentials && sudo mount -a`
+---
 
-### 2. Clone / copy this project
+## Quick start
 
 ```bash
-mkdir -p ~/apps/kharcha
-# copy all files here
-```
-
-### 3. Install dependencies
-
-```bash
-cd ~/apps/kharcha
-python3 -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
+python app.py
 ```
 
-### 4. Set the spreadsheet path
-
-```bash
-export EXPENSES_XLSX=/mnt/expenses/expenses.xlsx
-```
-
-Or set it permanently in the systemd service (see below).
-
-### 5. Run (dev test)
-
-```bash
-source venv/bin/activate
-EXPENSES_XLSX=/mnt/expenses/expenses.xlsx python app.py
-```
-
-Open `http://10.0.1.10:5000` on any WireGuard device.
+On first launch, open `http://localhost:5000` — the setup wizard will guide you through creating your login and adding accounts.
 
 ---
 
-## Run as systemd service
+## Data & Backup
 
-Create `/etc/systemd/system/kharcha.service`:
+All user data lives in the `data/` folder:
 
-```ini
-[Unit]
-Description=Kharcha Expense Tracker
-After=network.target
+| File | Contents |
+|------|----------|
+| `data/auth.json` | Login credentials (username + bcrypt hash) |
+| `data/accounts.json` | Account definitions (names, types, balances/limits) |
+| `data/categories.json` | Category and sub-category definitions |
+| `data/expenses.xlsx` | All transaction data |
 
-[Service]
-User=red_leader
-WorkingDirectory=/home/red_leader/apps/kharcha
-Environment=EXPENSES_XLSX=/mnt/expenses/expenses.xlsx
-ExecStart=/home/red_leader/apps/kharcha/venv/bin/python app.py
-Restart=on-failure
-RestartSec=5
+To migrate or restore: copy the entire `data/` folder to the new install. The app handles an empty or missing `data/` folder gracefully — it will show the setup wizard to start fresh.
 
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now kharcha
-sudo systemctl status kharcha
-```
+The `.env` file holds only server config (host, port, secret key) and is auto-generated during setup if missing.
 
 ---
 
-## First-time spreadsheet setup
+## Resetting credentials
 
-On first launch, the app auto-creates `expenses.xlsx` at `EXPENSES_XLSX` path.
-Open it in LibreOffice Calc and set:
-- **B1** — your Credit Card limit (e.g. `150000` for ₹1,50,000)
-- **B2** — your Opening Savings Balance for the month
+The setup page is only available on first run. To change your login after setup:
+
+1. Generate a new password hash:
+   ```bash
+   python -c "import bcrypt; print(bcrypt.hashpw(b'newpassword', bcrypt.gensalt()).decode())"
+   ```
+
+2. Edit `data/auth.json`:
+   ```json
+   {
+     "username": "newusername",
+     "password_hash": "<paste hash here>"
+   }
+   ```
+
+3. Restart the app.
+
+To start completely fresh, delete the `data/` folder and restart — the setup wizard will appear.
 
 ---
 
 ## Project structure
 
 ```
-kharcha/
-├── app.py              # Flask routes
-├── spreadsheet.py      # openpyxl read/write logic
-├── categories.json     # Category/sub-category definitions
+├── app.py              # Flask routes, auth, API endpoints
+├── spreadsheet.py      # openpyxl read/write, balance computation
 ├── requirements.txt
+├── .env                # Server config (not in git, auto-generated)
+├── data/               # All user data (not in git)
+│   ├── auth.json       # Login credentials
+│   ├── accounts.json   # Account definitions
+│   ├── categories.json # Category definitions
+│   └── expenses.xlsx   # Transaction data
+├── static/
+│   ├── themes.css      # 7 color palettes (dark + light each)
+│   └── theme.js        # Theme picker logic + localStorage
 └── templates/
-    ├── add.html        # /add  — expense entry form
-    ├── expenses.html   # /expenses — transaction list
-    └── dashboard.html  # /dashboard — Plotly charts
+    ├── setup.html      # First-time setup wizard
+    ├── login.html      # Login page
+    ├── dashboard.html  # Plotly charts & stats (home page)
+    ├── manage.html     # Add transactions + transaction list
+    └── accounts.html   # Account management
 ```
-
----
-
-## URLs
-
-| URL | Purpose |
-|-----|---------|
-| `http://10.0.1.10:5000/` | Redirects to /add |
-| `http://10.0.1.10:5000/add` | Add new expense |
-| `http://10.0.1.10:5000/add/sub/<id>` | Add sub-expense to transaction |
-| `http://10.0.1.10:5000/expenses` | Transaction list |
-| `http://10.0.1.10:5000/dashboard` | Charts & summary |
 
 ---
 
 ## Notes
 
 - Only parent transactions count toward balance calculations — sub-items don't double-count
-- Transaction IDs are global integers across all months — safe to use as Parent IDs even if rows are inserted
-- The `.xlsx` is the single source of truth — you can still edit it manually in LibreOffice Calc
-- `categories.json` is updated live from the frontend — no restart needed
+- Transaction IDs are global integers across all months
+- The `.xlsx` is the single source of truth — you can edit it manually in a spreadsheet app
+- `categories.json` and `accounts.json` are updated live from the frontend — no restart needed
+- Themes persist across pages via localStorage
+
+---
+
+## Built with LLM
+
+This project was built using an LLM (Claude). If you want to modify or extend it, feed [`LLM.md`](LLM.md) to your LLM — it contains a detailed implementation guide covering the architecture, data models, API endpoints, theming system, security measures, and common modification patterns.

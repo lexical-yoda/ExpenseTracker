@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Manage — Expense Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      padding-bottom: 40px;
+    }
+
+    /* ── Nav ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+    }
+    .nav-logo {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 1.3rem;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+      text-decoration: none;
+    }
+    .nav-logout { color: var(--danger) !important; }
+    .nav-links { display: flex; gap: 4px; }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.75rem;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: all 0.15s;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .nav-links a:hover, .nav-links a.active {
+      color: var(--text);
+      background: var(--surface2);
+    }
+    .nav-links a.active { color: var(--accent); }
+
+    /* ── Page container ── */
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px 20px;
+    }
+
+    /* ── Parent badge (sub-expense mode) ── */
+    .parent-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      font-size: 0.8rem;
+    }
+    .parent-badge-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-size: 0.7rem;
+    }
+    .parent-badge-desc { font-weight: 500; color: var(--text); }
+    .parent-badge-amount { margin-left: auto; color: var(--accent); font-weight: 500; }
+
+    /* ── Collapsible card ── */
+    .collapsible-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+    .collapsible-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    .collapsible-header:hover { background: var(--surface2); }
+    .collapsible-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+    .collapsible-toggle {
+      color: var(--muted);
+      font-size: 0.8rem;
+      transition: transform 0.2s;
+    }
+    .collapsible-card.collapsed .collapsible-toggle { transform: rotate(-90deg); }
+    .collapsible-body {
+      padding: 0 20px 20px;
+      transition: max-height 0.3s ease;
+    }
+    .collapsible-card.collapsed .collapsible-body { display: none; }
+
+    /* ── Form ── */
+    .form-group { margin-bottom: 18px; }
+
+    label {
+      display: block;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+      padding: 13px 14px;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+    }
+
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1) opacity(0.4);
+    }
+
+    /* ── Amount field ── */
+    .amount-wrap { position: relative; }
+    .amount-prefix {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--accent);
+      font-size: 1rem;
+      font-weight: 500;
+      pointer-events: none;
+    }
+    .amount-wrap input {
+      padding-left: 30px;
+      font-size: 1.3rem;
+      font-weight: 500;
+    }
+
+    /* ── Type toggle (add form) ── */
+    .account-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .account-btn { position: relative; }
+    .account-btn input[type="radio"] { position: absolute; opacity: 0; width: 0; }
+    .account-btn label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin: 0;
+    }
+    .account-btn input[type="radio"]:checked + label {
+      border-color: var(--accent);
+      color: var(--text);
+      background: rgba(88, 166, 255, 0.08);
+    }
+    .account-btn.savings input[type="radio"]:checked + label {
+      border-color: var(--savings);
+      background: rgba(88, 166, 255, 0.08);
+      color: var(--savings);
+    }
+    .account-btn.cc input[type="radio"]:checked + label {
+      border-color: var(--cc);
+      background: rgba(210, 153, 34, 0.08);
+      color: var(--cc);
+    }
+    .account-btn.expense input[type="radio"]:checked + label {
+      border-color: var(--danger);
+      background: rgba(248, 81, 73, 0.08);
+      color: var(--danger);
+    }
+    .account-btn.income input[type="radio"]:checked + label {
+      border-color: var(--success);
+      background: rgba(63, 185, 80, 0.08);
+      color: var(--success);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* ── Category row ── */
+    .category-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    .new-cat-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      width: 48px;
+      cursor: pointer;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .new-cat-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ── Submit button ── */
+    .submit-btn {
+      width: 100%;
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-top: 8px;
+      letter-spacing: 0.3px;
+    }
+    .submit-btn:hover { background: var(--accent-dim); transform: translateY(-1px); }
+    .submit-btn:active { transform: translateY(0); }
+    .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .submit-btn.danger { background: var(--danger); }
+    .submit-btn.cancel { background: var(--surface2); color: var(--text); }
+    .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+    .btn-row .submit-btn { margin-top: 0; }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 24px 0;
+    }
+
+    /* ── Section header ── */
+    .section-header {
+      margin-bottom: 24px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .section-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.3rem;
+    }
+    .page-count { font-size: 0.75rem; color: var(--muted); }
+
+    /* ── Search ── */
+    .search-wrap { margin-bottom: 16px; position: relative; }
+    .search-wrap input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      padding: 11px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .search-wrap input:focus { border-color: var(--accent); }
+
+    /* ── Month group ── */
+    .month-group { margin-bottom: 28px; }
+    .month-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Transaction card ── */
+    .txn-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .txn-card:hover { border-color: var(--surface2); }
+
+    .txn-main {
+      display: flex;
+      align-items: center;
+      padding: 14px 16px;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .txn-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .txn-dot.savings { background: var(--savings); }
+    .txn-dot.cc { background: var(--cc); }
+
+    .txn-info { flex: 1; min-width: 0; }
+    .txn-desc {
+      font-size: 0.9rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .txn-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 3px;
+      display: flex;
+      gap: 8px;
+    }
+    .txn-cat {
+      background: var(--surface2);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .txn-right { text-align: right; flex-shrink: 0; }
+    .txn-amount { font-size: 0.95rem; font-weight: 500; color: var(--text); }
+    .txn-amount.income { color: var(--success); }
+    .txn-date { font-size: 0.72rem; color: var(--muted); margin-top: 3px; }
+
+    .expand-icon {
+      color: var(--muted);
+      font-size: 0.7rem;
+      margin-left: 8px;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .txn-card.expanded .expand-icon { transform: rotate(180deg); }
+
+    /* ── Action buttons ── */
+    .txn-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .action-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      padding: 0;
+    }
+    .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .action-btn.del:hover { border-color: var(--danger); color: var(--danger); }
+
+    /* ── Sub-items ── */
+    .sub-items {
+      display: none;
+      border-top: 1px solid var(--border);
+      background: var(--surface2);
+      padding: 8px 16px 12px 16px;
+    }
+    .txn-card.expanded .sub-items { display: block; }
+
+    .sub-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.82rem;
+    }
+    .sub-item:last-of-type { border-bottom: none; }
+
+    .sub-item-dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0;
+    }
+    .sub-item-info { flex: 1; }
+    .sub-item-desc { color: var(--text); }
+    .sub-item-sub { font-size: 0.7rem; color: var(--muted); }
+    .sub-item-amount { color: var(--muted); font-size: 0.82rem; flex-shrink: 0; }
+
+    .add-sub-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      background: none;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      padding: 8px 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s;
+      width: 100%;
+      justify-content: center;
+    }
+    .add-sub-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .empty-title { font-family: var(--font-display); font-size: 1.1rem; color: var(--text); margin-bottom: 6px; }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 100;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 20px 20px 0 0;
+      padding: 24px 20px 40px;
+      width: 100%;
+      max-width: 540px;
+      max-height: 85vh;
+      overflow-y: auto;
+      animation: slide-up 0.2s ease;
+    }
+    @keyframes slide-up {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+    .modal-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      margin: 0 auto 20px;
+    }
+    .modal-title {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    /* ── Edit modal type toggle ── */
+    .toggle-btn { position: relative; }
+    .toggle-btn input[type="radio"] { position: absolute; opacity: 0; width: 0; }
+    .toggle-btn label {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 11px; cursor: pointer; transition: all 0.15s;
+      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted); margin: 0;
+    }
+    .toggle-btn input[type="radio"]:checked + label {
+      border-color: var(--accent); color: var(--text); background: rgba(88,166,255,0.08);
+    }
+    .toggle-btn.savings input:checked + label { border-color: var(--savings); color: var(--savings); background: rgba(88,166,255,0.08); }
+    .toggle-btn.cc input:checked + label { border-color: var(--cc); color: var(--cc); background: rgba(210,153,34,0.08); }
+    .toggle-btn.expense input:checked + label { border-color: var(--danger); color: var(--danger); background: rgba(248,81,73,0.08); }
+    .toggle-btn.income input:checked + label { border-color: var(--success); color: var(--success); background: rgba(63,185,80,0.08); }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 50px;
+      padding: 12px 20px;
+      font-size: 0.85rem;
+      z-index: 200;
+      transition: transform 0.3s ease;
+      white-space: nowrap;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.success { border-color: var(--success); color: var(--success); }
+    .toast.error { border-color: var(--danger); color: var(--danger); }
+
+    /* ── Theme overrides ── */
+    select option { background: var(--surface); }
+    [data-theme="light"] .submit-btn { color: #ffffff; }
+    [data-theme="light"] .submit-btn.cancel { color: var(--text); }
+    [data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator { filter: none; }
+
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">Expense Manager</a>
+  <div class="nav-links">
+    <a href="/">Dashboard</a>
+    <a href="/manage" class="active">Manage</a>
+    <a href="/accounts">Accounts</a>
+    <a href="/logout" class="nav-logout">Log Out</a>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
+  </div>
+</nav>
+
+<div class="container">
+
+  {% if parent %}
+  <div class="parent-badge">
+    <div>
+      <div class="parent-badge-label">Parent</div>
+      <div class="parent-badge-desc">{{ parent.description }}</div>
+    </div>
+    <div class="parent-badge-amount">₹{{ "%.2f"|format(parent.amount) }}</div>
+  </div>
+  {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ADD FORM (collapsible)                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="collapsible-card" id="add-card">
+    <div class="collapsible-header" onclick="toggleAddCard()">
+      <div class="collapsible-title">New Transaction</div>
+      <span class="collapsible-toggle">▾</span>
+    </div>
+    <div class="collapsible-body">
+      <form id="expense-form">
+        {% if parent %}
+        <input type="hidden" id="parent_id" value="{{ parent.id }}">
+        {% endif %}
+
+        <div class="form-group">
+          <label>Type</label>
+          <div class="account-toggle">
+            <div class="account-btn expense">
+              <input type="radio" name="txn_type" id="type-expense" value="Expense" checked>
+              <label for="type-expense"><span class="dot"></span> Expense</label>
+            </div>
+            <div class="account-btn income">
+              <input type="radio" name="txn_type" id="type-income" value="Income">
+              <label for="type-income"><span class="dot"></span> Income</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="date">Date</label>
+          <input type="date" id="date" value="{{ today }}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="description">Description</label>
+          <input type="text" id="description" placeholder="e.g. Tesco grocery run" required autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="account">Account</label>
+          <select id="account" required>
+            <option value="" disabled selected>Select account</option>
+            {% for acct in accounts %}
+            <option value="{{ acct.name }}">{{ acct.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="amount">Amount</label>
+          <div class="amount-wrap">
+            <span class="amount-prefix">₹</span>
+            <input type="number" id="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="form-group">
+          <label>Category</label>
+          <div class="category-row">
+            <select id="category" required>
+              <option value="" disabled selected>Select category</option>
+              {% for cat in categories %}
+              <option value="{{ cat }}">{{ cat }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="new-cat-btn" id="new-cat-btn" title="Add new category">+</button>
+          </div>
+        </div>
+
+        <div class="form-group" id="subcategory-group">
+          <label>Sub-category <span style="color:var(--muted)">(optional)</span></label>
+          <div class="category-row">
+            <select id="sub_category">
+              <option value="">None</option>
+            </select>
+            <button type="button" class="new-cat-btn" id="new-subcat-btn" title="Add new sub-category" disabled>+</button>
+          </div>
+        </div>
+
+        <button type="submit" class="submit-btn" id="submit-btn">
+          {% if parent %}Add Sub-expense{% else %}Save Expense{% endif %}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- TRANSACTION LIST                                                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <hr class="divider">
+
+  <div class="section-header">
+    <div class="section-title">Transactions</div>
+    <div class="page-count" id="txn-count">{{ parents|length }} transactions</div>
+  </div>
+
+  <div class="search-wrap">
+    <input type="text" id="search" placeholder="Search description, category...">
+  </div>
+
+  {% if not parents %}
+  <div class="empty">
+    <div class="empty-icon">📭</div>
+    <div class="empty-title">No transactions yet</div>
+    <div>Use the form above to add your first transaction</div>
+  </div>
+  {% else %}
+
+  {% set account_types = {} %}
+  {% for acct in accounts %}
+    {% set _ = account_types.update({acct.name: acct.type}) %}
+  {% endfor %}
+
+  <div id="txn-list">
+    {% set ns = namespace(cur_month='') %}
+    {% for txn in parents %}
+      {% set txn_month = txn.date[:7] %}
+      {% if txn_month != ns.cur_month %}
+        {% set ns.cur_month = txn_month %}
+        <div class="month-label" data-month="{{ txn_month }}">
+          {{ txn.date[5:7] }}/{{ txn.date[:4] }}
+        </div>
+      {% endif %}
+
+      <div class="txn-card" data-id="{{ txn.id }}" data-desc="{{ txn.description|lower }}" data-cat="{{ txn.category|lower }}">
+        <div class="txn-main" onclick="toggleCard(this.parentElement)">
+          <span class="txn-dot {{ 'savings' if account_types.get(txn.account) == 'savings' else 'cc' }}"></span>
+          <div class="txn-info">
+            <div class="txn-desc">{{ txn.description }}</div>
+            <div class="txn-meta">
+              <span class="txn-cat">{{ txn.category }}</span>
+              {% if txn.sub_category %}<span>{{ txn.sub_category }}</span>{% endif %}
+            </div>
+          </div>
+          <div class="txn-right">
+            <div class="txn-amount {{ 'income' if txn.type == 'Income' else '' }}">{% if txn.type == 'Income' %}+{% else %}-{% endif %}₹{{ "%.2f"|format(txn.amount) }}</div>
+            <div class="txn-date">{{ txn.date[8:] }}/{{ txn.date[5:7] }}</div>
+          </div>
+          <div class="txn-actions" onclick="event.stopPropagation()">
+            <button class="action-btn" onclick="openEditModal({{ txn.id }})" title="Edit">&#9998;</button>
+            <button class="action-btn del" onclick="confirmDelete({{ txn.id }}, false)" title="Delete">&#10005;</button>
+          </div>
+          {% set sub_count = children.get(txn.id, [])|length %}
+          <span class="expand-icon">▾ {% if sub_count > 0 %}({{ sub_count }}){% endif %}</span>
+        </div>
+
+        <div class="sub-items">
+          {% for sub in children.get(txn.id, []) %}
+          <div class="sub-item">
+            <span class="sub-item-dot"></span>
+            <div class="sub-item-info">
+              <div class="sub-item-desc">{{ sub.description }}</div>
+              {% if sub.sub_category %}<div class="sub-item-sub">{{ sub.sub_category }}</div>{% endif %}
+            </div>
+            <div class="sub-item-amount">₹{{ "%.2f"|format(sub.amount) }}</div>
+            <div class="txn-actions">
+              <button class="action-btn" onclick="openEditModal({{ sub.id }})" title="Edit">&#9998;</button>
+              <button class="action-btn del" onclick="confirmDelete({{ sub.id }}, true)" title="Delete">&#10005;</button>
+            </div>
+          </div>
+          {% endfor %}
+          <a href="/manage?parent={{ txn.id }}" class="add-sub-btn">+ add sub-expense</a>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- NEW CATEGORY MODAL                                                        -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="cat-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modal-title">New Category</div>
+    <div class="form-group" id="modal-cat-group">
+      <label>Category name</label>
+      <input type="text" id="modal-cat-name" placeholder="e.g. Travel" autocomplete="off">
+    </div>
+    <div class="form-group" id="modal-subcat-group" style="display:none">
+      <label>Sub-category name</label>
+      <input type="text" id="modal-subcat-name" placeholder="e.g. Flights" autocomplete="off">
+    </div>
+    <button class="submit-btn" id="modal-save-btn">Save</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- EDIT TRANSACTION MODAL                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="edit-title">Edit Transaction</div>
+    <input type="hidden" id="edit-txn-id">
+
+    <div class="form-group">
+      <label>Type</label>
+      <div class="account-toggle">
+        <div class="toggle-btn expense">
+          <input type="radio" name="edit-type" id="edit-type-expense" value="Expense" checked>
+          <label for="edit-type-expense"><span class="dot"></span> Expense</label>
+        </div>
+        <div class="toggle-btn income">
+          <input type="radio" name="edit-type" id="edit-type-income" value="Income">
+          <label for="edit-type-income"><span class="dot"></span> Income</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="edit-date">Date</label>
+      <input type="date" id="edit-date" required>
+    </div>
+
+    <div class="form-group">
+      <label for="edit-desc">Description</label>
+      <input type="text" id="edit-desc" required autocomplete="off">
+    </div>
+
+    <div class="form-group">
+      <label for="edit-account">Account</label>
+      <select id="edit-account" required>
+        <option value="" disabled>Select account</option>
+        {% for acct in accounts %}
+        <option value="{{ acct.name }}">{{ acct.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="edit-amount">Amount</label>
+      <input type="number" id="edit-amount" step="0.01" min="0" required inputmode="decimal">
+    </div>
+
+    <div class="form-group">
+      <label for="edit-category">Category</label>
+      <select id="edit-category" required>
+        <option value="" disabled>Select category</option>
+        {% for cat in categories %}
+        <option value="{{ cat }}">{{ cat }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="edit-subcategory">Sub-category</label>
+      <select id="edit-subcategory">
+        <option value="">None</option>
+      </select>
+    </div>
+
+    <button class="submit-btn" id="edit-save-btn">Save Changes</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- DELETE CONFIRMATION MODAL                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="delete-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Delete Transaction</div>
+    <p id="delete-msg" style="color: var(--muted); font-size: 0.85rem; margin-bottom: 20px;">
+      Are you sure? This cannot be undone.
+    </p>
+    <div class="btn-row">
+      <button class="submit-btn cancel" onclick="closeDeleteModal()">Cancel</button>
+      <button class="submit-btn danger" id="confirm-delete-btn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const categories = {{ categories | tojson }};
+  const accounts = {{ accounts | tojson }};
+  const accountTypes = {};
+  accounts.forEach(a => accountTypes[a.name] = a.type);
+  let modalMode = 'category'; // 'category' or 'subcategory'
+  let deleteTargetId = null;
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // COLLAPSIBLE CARD
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function toggleAddCard() {
+    document.getElementById('add-card').classList.toggle('collapsed');
+  }
+
+  // Auto-expand when in sub-expense mode
+  {% if parent %}
+  // Already expanded by default — no action needed
+  {% endif %}
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADD FORM: CATEGORY / SUB-CATEGORY
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  document.getElementById('category').addEventListener('change', function() {
+    const cat = this.value;
+    const subSelect = document.getElementById('sub_category');
+    const newSubBtn = document.getElementById('new-subcat-btn');
+
+    subSelect.innerHTML = '<option value="">None</option>';
+    if (categories[cat]) {
+      categories[cat].forEach(sub => {
+        const opt = document.createElement('option');
+        opt.value = sub;
+        opt.textContent = sub;
+        subSelect.appendChild(opt);
+      });
+    }
+    newSubBtn.disabled = false;
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW CATEGORY MODAL
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  document.getElementById('new-cat-btn').addEventListener('click', () => {
+    modalMode = 'category';
+    document.getElementById('modal-title').textContent = 'New Category';
+    document.getElementById('modal-cat-group').style.display = 'block';
+    document.getElementById('modal-subcat-group').style.display = 'none';
+    document.getElementById('modal-cat-name').value = '';
+    document.getElementById('cat-modal').classList.add('open');
+    setTimeout(() => document.getElementById('modal-cat-name').focus(), 200);
+  });
+
+  document.getElementById('new-subcat-btn').addEventListener('click', () => {
+    const cat = document.getElementById('category').value;
+    if (!cat) return;
+    modalMode = 'subcategory';
+    document.getElementById('modal-title').textContent = `New Sub-category in "${cat}"`;
+    document.getElementById('modal-cat-group').style.display = 'none';
+    document.getElementById('modal-subcat-group').style.display = 'block';
+    document.getElementById('modal-subcat-name').value = '';
+    document.getElementById('cat-modal').classList.add('open');
+    setTimeout(() => document.getElementById('modal-subcat-name').focus(), 200);
+  });
+
+  document.getElementById('cat-modal').addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('open');
+  });
+
+  document.getElementById('modal-save-btn').addEventListener('click', async () => {
+    const catName = modalMode === 'category'
+      ? document.getElementById('modal-cat-name').value.trim()
+      : document.getElementById('category').value;
+    const subName = modalMode === 'subcategory'
+      ? document.getElementById('modal-subcat-name').value.trim()
+      : '';
+
+    if (!catName) return;
+
+    const res = await fetch('/api/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ category: catName, sub_category: subName })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      Object.assign(categories, data.categories);
+
+      const catSelect = document.getElementById('category');
+      if (modalMode === 'category') {
+        const opt = document.createElement('option');
+        opt.value = catName;
+        opt.textContent = catName;
+        catSelect.appendChild(opt);
+        catSelect.value = catName;
+        catSelect.dispatchEvent(new Event('change'));
+      } else if (subName) {
+        const subSelect = document.getElementById('sub_category');
+        const opt = document.createElement('option');
+        opt.value = subName;
+        opt.textContent = subName;
+        subSelect.appendChild(opt);
+        subSelect.value = subName;
+      }
+
+      document.getElementById('cat-modal').classList.remove('open');
+      showToast('Saved!', 'success');
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADD FORM SUBMISSION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  document.getElementById('expense-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    const parentIdEl = document.getElementById('parent_id');
+    const payload = {
+      date: document.getElementById('date').value,
+      description: document.getElementById('description').value,
+      account: document.getElementById('account').value,
+      amount: document.getElementById('amount').value,
+      category: document.getElementById('category').value,
+      sub_category: document.getElementById('sub_category').value,
+      parent_id: parentIdEl ? parseInt(parentIdEl.value) : null,
+      type: document.querySelector('input[name="txn_type"]:checked').value,
+    };
+
+    try {
+      const res = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        const typeLabel = payload.type === 'Income' ? 'Income' : 'Expense';
+        showToast(typeLabel + ' saved ✓', 'success');
+        setTimeout(() => {
+          {% if parent %}
+          window.location.href = '/manage';
+          {% else %}
+          document.getElementById('expense-form').reset();
+          document.getElementById('date').value = '{{ today }}';
+          document.getElementById('sub_category').innerHTML = '<option value="">None</option>';
+          document.getElementById('new-subcat-btn').disabled = true;
+          btn.disabled = false;
+          btn.textContent = 'Save Expense';
+          {% endif %}
+        }, 800);
+      } else {
+        showToast('Error: ' + data.error, 'error');
+        btn.disabled = false;
+        btn.textContent = '{% if parent %}Add Sub-expense{% else %}Save Expense{% endif %}';
+      }
+    } catch (err) {
+      showToast('Network error', 'error');
+      btn.disabled = false;
+      btn.textContent = '{% if parent %}Add Sub-expense{% else %}Save Expense{% endif %}';
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TRANSACTION LIST: TOGGLE / SEARCH
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function toggleCard(card) {
+    card.classList.toggle('expanded');
+  }
+
+  document.getElementById('search')?.addEventListener('input', function() {
+    const q = this.value.toLowerCase().trim();
+    const cards = document.querySelectorAll('.txn-card');
+    let visible = 0;
+    cards.forEach(card => {
+      const desc = card.dataset.desc || '';
+      const cat = card.dataset.cat || '';
+      const match = !q || desc.includes(q) || cat.includes(q);
+      card.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    document.getElementById('txn-count').textContent = visible + ' transactions';
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // EDIT MODAL
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function populateSubcategories(selectId, cat, selectedVal) {
+    const sel = document.getElementById(selectId);
+    sel.innerHTML = '<option value="">None</option>';
+    if (categories[cat]) {
+      categories[cat].forEach(sub => {
+        const opt = document.createElement('option');
+        opt.value = sub;
+        opt.textContent = sub;
+        if (sub === selectedVal) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+  }
+
+  document.getElementById('edit-category').addEventListener('change', function() {
+    populateSubcategories('edit-subcategory', this.value, '');
+  });
+
+  async function openEditModal(txnId) {
+    const res = await fetch(`/api/transactions/${txnId}`);
+    const txn = await res.json();
+    if (txn.error) { showToast('Transaction not found', 'error'); return; }
+
+    document.getElementById('edit-txn-id').value = txn.id;
+    document.getElementById('edit-date').value = txn.date;
+    document.getElementById('edit-desc').value = txn.description;
+    document.getElementById('edit-amount').value = txn.amount;
+
+    if (txn.type === 'Income') {
+      document.getElementById('edit-type-income').checked = true;
+    } else {
+      document.getElementById('edit-type-expense').checked = true;
+    }
+
+    document.getElementById('edit-account').value = txn.account;
+    document.getElementById('edit-category').value = txn.category;
+    populateSubcategories('edit-subcategory', txn.category, txn.sub_category);
+
+    document.getElementById('edit-title').textContent = txn.parent_id ? 'Edit Sub-item' : 'Edit Transaction';
+    document.getElementById('edit-modal').classList.add('open');
+  }
+
+  document.getElementById('edit-modal').addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('open');
+  });
+
+  document.getElementById('edit-save-btn').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    const txnId = document.getElementById('edit-txn-id').value;
+    const payload = {
+      date: document.getElementById('edit-date').value,
+      description: document.getElementById('edit-desc').value,
+      account: document.getElementById('edit-account').value,
+      amount: document.getElementById('edit-amount').value,
+      category: document.getElementById('edit-category').value,
+      sub_category: document.getElementById('edit-subcategory').value,
+      type: document.querySelector('input[name="edit-type"]:checked').value,
+    };
+
+    try {
+      const res = await fetch(`/api/transactions/${txnId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        showToast('Updated', 'success');
+        setTimeout(() => location.reload(), 600);
+      } else {
+        showToast(data.error || 'Update failed', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+      }
+    } catch (err) {
+      showToast('Network error', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DELETE MODAL
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function confirmDelete(txnId, isSubItem) {
+    deleteTargetId = txnId;
+    const msg = isSubItem
+      ? 'Delete this sub-item?'
+      : 'Delete this transaction and all its sub-items?';
+    document.getElementById('delete-msg').textContent = msg + ' This cannot be undone.';
+    document.getElementById('delete-modal').classList.add('open');
+  }
+
+  function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.remove('open');
+    deleteTargetId = null;
+  }
+
+  document.getElementById('delete-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeDeleteModal();
+  });
+
+  document.getElementById('confirm-delete-btn').addEventListener('click', async function() {
+    if (!deleteTargetId) return;
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Deleting...';
+
+    try {
+      const res = await fetch(`/api/transactions/${deleteTargetId}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRFToken': csrfToken }
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        showToast('Deleted', 'success');
+        setTimeout(() => location.reload(), 600);
+      } else {
+        showToast(data.error || 'Delete failed', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+        closeDeleteModal();
+      }
+    } catch (err) {
+      showToast('Network error', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Delete';
+      closeDeleteModal();
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TOAST HELPER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+</script>
+<script src="/static/theme.js"></script>
+<script>initThemePicker();</script>
+</body>
+</html>

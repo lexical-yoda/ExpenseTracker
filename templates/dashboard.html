@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Dashboard — Expense Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--font-mono); min-height: 100vh; padding-bottom: 60px;
+    }
+    nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 10;
+    }
+    .nav-logo { font-family: var(--font-display); font-weight: 800; font-size: 1.3rem; color: var(--accent); letter-spacing: -0.5px; text-decoration: none; }
+    .nav-logout { color: var(--danger) !important; }
+    .nav-links { display: flex; gap: 4px; }
+    .nav-links a {
+      color: var(--muted); text-decoration: none; font-size: 0.75rem;
+      padding: 6px 12px; border-radius: 6px; transition: all 0.15s;
+      letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--surface2); }
+    .nav-links a.active { color: var(--accent); }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
+
+    .page-header { margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .page-title { font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; }
+
+    /* Filter pills */
+    .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .filter-pill {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 50px; color: var(--muted); font-family: var(--font-mono);
+      font-size: 0.72rem; padding: 6px 14px; cursor: pointer; transition: all 0.15s;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .filter-pill:hover { border-color: var(--accent-dim); color: var(--text); }
+    .filter-pill.active { border-color: var(--accent); color: var(--accent); background: rgba(88,166,255,0.08); }
+
+    /* Stat cards */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 900px) { .stats-row { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 480px) { .stats-row { grid-template-columns: 1fr 1fr; } }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .stat-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 6px; }
+    .stat-value { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; }
+    .stat-sub { font-size: 0.65rem; color: var(--muted); margin-top: 3px; }
+
+    /* Two-column chart grid on desktop */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 900px) {
+      .charts-grid { grid-template-columns: 1fr 1fr; }
+      .charts-grid .chart-card.full-width { grid-column: 1 / -1; }
+    }
+
+    /* Chart cards */
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .chart-title { font-family: var(--font-display); font-weight: 600; font-size: 0.95rem; margin-bottom: 16px; color: var(--text); }
+    .chart-wrap { width: 100%; }
+
+    /* Account balance cards */
+    .acct-balances {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .acct-bal-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .acct-bal-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .acct-bal-dot.savings { background: var(--savings); }
+    .acct-bal-dot.credit { background: var(--cc); }
+    .acct-bal-info { flex: 1; }
+    .acct-bal-name { font-size: 0.8rem; font-weight: 500; margin-bottom: 2px; }
+    .acct-bal-detail { font-size: 0.65rem; color: var(--muted); }
+    .acct-bal-amount { font-family: var(--font-display); font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+
+    /* Recent transactions */
+    .recent-list { margin-top: 4px; }
+    .recent-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.8rem;
+    }
+    .recent-item:last-child { border-bottom: none; }
+    .recent-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .recent-dot.savings { background: var(--savings); }
+    .recent-dot.credit { background: var(--cc); }
+    .recent-info { flex: 1; min-width: 0; }
+    .recent-desc {
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      font-weight: 500;
+    }
+    .recent-meta { font-size: 0.65rem; color: var(--muted); margin-top: 2px; }
+    .recent-amount { font-weight: 500; flex-shrink: 0; }
+    .recent-amount.income { color: var(--success); }
+
+    /* Section title */
+    .section-label {
+      font-family: var(--font-display); font-weight: 600; font-size: 0.85rem;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+
+    /* Custom date range */
+    .date-range-row {
+      display: none; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap;
+    }
+    .date-range-row.open { display: flex; }
+    .date-range-row input[type="date"] {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-family: var(--font-mono); font-size: 0.75rem;
+      padding: 6px 10px; outline: none; -webkit-appearance: none; appearance: none;
+    }
+    .date-range-row input[type="date"]:focus { border-color: var(--accent); }
+    [data-theme="dark"] .date-range-row input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1) opacity(0.4);
+    }
+    .date-range-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .date-range-apply {
+      background: var(--accent); color: #ffffff; border: none; border-radius: 8px;
+      font-family: var(--font-display); font-weight: 700; font-size: 0.72rem;
+      padding: 7px 14px; cursor: pointer; transition: all 0.15s; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .date-range-apply:hover { opacity: 0.85; }
+
+    #stat-income { color: var(--success); }
+    #stat-savings { color: var(--savings); }
+    #stat-cc { color: var(--cc); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">Expense Manager</a>
+  <div class="nav-links">
+    <a href="/" class="active">Dashboard</a>
+    <a href="/manage">Manage</a>
+    <a href="/accounts">Accounts</a>
+    <a href="/logout" class="nav-logout">Log Out</a>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="page-title">Dashboard</div>
+    <div class="filter-row" id="filter-row">
+      <button class="filter-pill active" data-filter="month">This Month</button>
+      <button class="filter-pill" data-filter="3months">3 Months</button>
+      <button class="filter-pill" data-filter="ytd">Year to Date</button>
+      <button class="filter-pill" data-filter="all">All Time</button>
+      <button class="filter-pill" data-filter="custom" id="custom-pill">Custom</button>
+    </div>
+  </div>
+
+  <div class="date-range-row" id="date-range-row">
+    <span class="date-range-label">From</span>
+    <input type="date" id="date-from">
+    <span class="date-range-label">To</span>
+    <input type="date" id="date-to">
+    <button class="date-range-apply" id="date-range-apply">Apply</button>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="stats-row" id="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Total Spent</div>
+      <div class="stat-value" id="stat-total">₹0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Income</div>
+      <div class="stat-value" id="stat-income">₹0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Net</div>
+      <div class="stat-value" id="stat-net">₹0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Transactions</div>
+      <div class="stat-value" id="stat-count">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg / Day</div>
+      <div class="stat-value" id="stat-avg">₹0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Top Category</div>
+      <div class="stat-value" id="stat-topcat" style="font-size:0.85rem">—</div>
+    </div>
+  </div>
+
+  <!-- Account balances -->
+  <div class="section-label">Account Balances</div>
+  <div class="acct-balances" id="acct-balances"></div>
+
+  <!-- Charts (two-column on desktop) -->
+  <div class="charts-grid">
+    <div class="chart-card full-width">
+      <div class="chart-title">Daily Spending</div>
+      <div class="chart-wrap" id="chart-daily" style="height:240px"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">By Category</div>
+      <div class="chart-wrap" id="chart-category" style="height:300px"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">By Account</div>
+      <div class="chart-wrap" id="chart-account" style="height:300px"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Month over Month</div>
+      <div class="chart-wrap" id="chart-monthly" style="height:260px"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Recent Transactions</div>
+      <div class="recent-list" id="recent-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const rawSummary = {{ summary|safe }};
+  const accountsData = {{ accounts|safe }};
+  const balancesData = {{ balances|safe }};
+
+  const accountTypeMap = {};
+  accountsData.forEach(a => accountTypeMap[a.name] = a.type);
+
+  // ── Plotly theme ──
+  function getThemeColors() {
+    const style = getComputedStyle(document.documentElement);
+    const get = (v) => style.getPropertyValue(v).trim();
+    const theme = document.documentElement.getAttribute('data-theme') || 'github-dark';
+    const isDark = theme.endsWith('-dark');
+    return {
+      PLOT_BG: get('--surface'),
+      PAPER_BG: get('--surface'),
+      FONT_COLOR: get('--muted'),
+      GRID_COLOR: get('--border'),
+      ACCENT: get('--accent'),
+      SAVINGS_COLOR: get('--savings'),
+      CC_COLOR: get('--cc'),
+      SUCCESS: get('--success'),
+      PIE_TEXT: isDark ? get('--bg') : '#ffffff',
+      MONTH_BAR_INACTIVE: get('--surface2'),
+      FILL_ALPHA: isDark ? (get('--accent') + '18') : (get('--accent') + '14'),
+      CAT_COLORS: [get('--accent'), get('--success'), get('--cc'), get('--danger'), get('--savings'), get('--muted'),
+                   get('--accent-dim'), get('--success'), get('--cc'), get('--danger')],
+    };
+  }
+
+  const plotLayout = (overrides = {}) => {
+    const c = getThemeColors();
+    return {
+      paper_bgcolor: c.PAPER_BG,
+      plot_bgcolor: c.PLOT_BG,
+      font: { family: "'DM Mono', monospace", color: c.FONT_COLOR, size: 11 },
+      margin: { t: 10, b: 40, l: 50, r: 10 },
+      xaxis: { gridcolor: c.GRID_COLOR, linecolor: c.GRID_COLOR, tickcolor: c.GRID_COLOR, fixedrange: true },
+      yaxis: { gridcolor: c.GRID_COLOR, linecolor: c.GRID_COLOR, tickcolor: c.GRID_COLOR, fixedrange: true },
+      dragmode: false,
+      ...overrides,
+    };
+  };
+
+  const plotConfig = {
+    responsive: true,
+    displayModeBar: false,
+    scrollZoom: false,
+    staticPlot: false,
+  };
+
+
+  // ── Date filtering ──
+  let customFrom = null;
+  let customTo = null;
+
+  function filterData(filter) {
+    const now = new Date();
+    let cutoff = null;
+    let cutoffEnd = null;
+
+    if (filter === 'month') {
+      cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else if (filter === '3months') {
+      cutoff = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    } else if (filter === 'ytd') {
+      cutoff = new Date(now.getFullYear(), 0, 1);
+    } else if (filter === 'custom' && customFrom && customTo) {
+      cutoff = new Date(customFrom);
+      cutoffEnd = new Date(customTo + 'T23:59:59');
+    }
+
+    function inRange(dateStr) {
+      if (!cutoff) return true;
+      const d = new Date(dateStr);
+      if (d < cutoff) return false;
+      if (cutoffEnd && d > cutoffEnd) return false;
+      return true;
+    }
+
+    const daily = {};
+    Object.entries(rawSummary.daily || {}).forEach(([d, v]) => {
+      if (inRange(d)) daily[d] = v;
+    });
+
+    const byCat = {};
+    const byAcc = {};
+    let totalIncome = 0;
+    let totalExpense = 0;
+    let txnCount = 0;
+    const recentTxns = [];
+
+    (rawSummary.transactions || []).forEach(t => {
+      if (inRange(t.date)) {
+        txnCount++;
+        if (recentTxns.length < 8) recentTxns.push(t);
+        if (t.type === 'Income') {
+          totalIncome += t.amount;
+        } else {
+          totalExpense += t.amount;
+          byCat[t.category] = (byCat[t.category] || 0) + t.amount;
+          byAcc[t.account] = (byAcc[t.account] || 0) + t.amount;
+        }
+      }
+    });
+
+    const numDays = Object.keys(daily).length || 1;
+    const avgDaily = totalExpense / numDays;
+
+    const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
+
+    return { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, topCat, recentTxns };
+  }
+
+  function fmt(n) {
+    return '₹' + Math.round(n).toLocaleString('en-IN');
+  }
+
+  // ── Render account balance cards ──
+  function renderAccountBalances() {
+    const container = document.getElementById('acct-balances');
+    container.innerHTML = balancesData.map(b => {
+      const isSavings = b.type === 'savings';
+      const amount = isSavings ? fmt(b.current_balance || 0) : fmt(b.remaining || 0);
+      const detail = isSavings ? 'Current balance' : `Spent ${fmt(b.accumulated || 0)} of ${fmt(b.limit || 0)}`;
+      return `<div class="acct-bal-card">
+        <span class="acct-bal-dot ${b.type}"></span>
+        <div class="acct-bal-info">
+          <div class="acct-bal-name">${b.name}</div>
+          <div class="acct-bal-detail">${detail}</div>
+        </div>
+        <div class="acct-bal-amount" style="color:var(--${isSavings ? 'savings' : 'cc'})">${amount}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Render recent transactions ──
+  function renderRecent(txns) {
+    const container = document.getElementById('recent-list');
+    if (!txns.length) {
+      container.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:20px 0;text-align:center">No transactions in this period</div>';
+      return;
+    }
+    container.innerHTML = txns.map(t => {
+      const type = accountTypeMap[t.account] || 'savings';
+      const isIncome = t.type === 'Income';
+      return `<div class="recent-item">
+        <span class="recent-dot ${type}"></span>
+        <div class="recent-info">
+          <div class="recent-desc">${t.description}</div>
+          <div class="recent-meta">${t.category} · ${t.date.slice(5)}</div>
+        </div>
+        <div class="recent-amount ${isIncome ? 'income' : ''}">${isIncome ? '+' : '-'}${fmt(t.amount)}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderAll(filter) {
+    const { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, topCat, recentTxns } = filterData(filter);
+    const c = getThemeColors();
+
+    // Stats
+    document.getElementById('stat-total').textContent = fmt(totalExpense);
+    document.getElementById('stat-income').textContent = fmt(totalIncome);
+
+    const net = totalIncome - totalExpense;
+    const netEl = document.getElementById('stat-net');
+    netEl.textContent = (net >= 0 ? '+' : '') + fmt(net);
+    netEl.style.color = net >= 0 ? c.SUCCESS : 'var(--danger)';
+
+    document.getElementById('stat-count').textContent = txnCount;
+    document.getElementById('stat-avg').textContent = fmt(avgDaily);
+    document.getElementById('stat-topcat').textContent = topCat ? topCat[0] : '—';
+
+    // Account balances
+    renderAccountBalances();
+
+    // Recent transactions
+    renderRecent(recentTxns);
+
+    // Daily chart
+    const dailyDates = Object.keys(daily).sort();
+    const dailyVals = dailyDates.map(d => daily[d]);
+    Plotly.react('chart-daily', [{
+      x: dailyDates, y: dailyVals, type: 'scatter', mode: 'lines+markers',
+      line: { color: c.ACCENT, width: 2 },
+      marker: { color: c.ACCENT, size: 5 },
+      fill: 'tozeroy',
+      fillcolor: c.FILL_ALPHA,
+      hovertemplate: '<b>%{x}</b><br>₹%{y:,.0f}<extra></extra>',
+    }], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), plotConfig);
+
+    // Category bar
+    const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+    Plotly.react('chart-category', [{
+      x: catEntries.map(e => e[1]),
+      y: catEntries.map(e => e[0]),
+      type: 'bar', orientation: 'h',
+      marker: { color: catEntries.map((_, i) => c.CAT_COLORS[i % c.CAT_COLORS.length]) },
+      hovertemplate: '<b>%{y}</b><br>₹%{x:,.0f}<extra></extra>',
+    }], plotLayout({
+      margin: { t: 10, b: 30, l: 130, r: 20 },
+      xaxis: { gridcolor: c.GRID_COLOR },
+      yaxis: { automargin: true },
+    }), plotConfig);
+
+    // Account donut
+    const accLabels = Object.keys(byAcc);
+    const accValues = accLabels.map(k => byAcc[k]);
+    const accColors = accLabels.map(k => accountTypeMap[k] === 'savings' ? c.SAVINGS_COLOR : c.CC_COLOR);
+    Plotly.react('chart-account', [{
+      labels: accLabels,
+      values: accValues,
+      type: 'pie',
+      hole: 0.55,
+      marker: { colors: accColors },
+      textinfo: 'percent',
+      hovertemplate: '<b>%{label}</b><br>₹%{value:,.0f}<br>%{percent}<extra></extra>',
+      textfont: { color: c.PIE_TEXT, size: 11 },
+    }], {
+      ...plotLayout(),
+      margin: { t: 20, b: 20, l: 20, r: 20 },
+      legend: { font: { color: c.FONT_COLOR, size: 11 }, orientation: 'h', y: -0.1 },
+      showlegend: true,
+    }, plotConfig);
+
+    // Month over month
+    const monthly = rawSummary.monthly || {};
+    const months = Object.keys(monthly).sort();
+    const monthTotals = months.map(m => Object.values(monthly[m]).reduce((a, b) => a + b, 0));
+    Plotly.react('chart-monthly', [{
+      x: months, y: monthTotals, type: 'bar',
+      marker: { color: months.map((m, i) => i === months.length - 1 ? c.ACCENT : c.MONTH_BAR_INACTIVE) },
+      hovertemplate: '<b>%{x}</b><br>₹%{y:,.0f}<extra></extra>',
+    }], plotLayout({ margin: { t: 10, b: 50, l: 70, r: 10 } }), plotConfig);
+  }
+
+  // ── Filter pills ──
+  document.getElementById('filter-row').addEventListener('click', function(e) {
+    const pill = e.target.closest('.filter-pill');
+    if (!pill) return;
+    document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+
+    const dateRow = document.getElementById('date-range-row');
+    if (pill.dataset.filter === 'custom') {
+      dateRow.classList.add('open');
+    } else {
+      dateRow.classList.remove('open');
+      renderAll(pill.dataset.filter);
+    }
+  });
+
+  // ── Custom date range apply ──
+  document.getElementById('date-range-apply').addEventListener('click', function() {
+    const from = document.getElementById('date-from').value;
+    const to = document.getElementById('date-to').value;
+    if (!from || !to) return;
+    customFrom = from;
+    customTo = to;
+    renderAll('custom');
+  });
+
+
+</script>
+<script src="/static/theme.js"></script>
+<script>
+  // Apply theme BEFORE initial chart render
+  initTheme();
+
+  function getActiveFilter() {
+    const active = document.querySelector('.filter-pill.active');
+    const filter = active ? active.dataset.filter : 'month';
+    if (filter === 'custom' && (!customFrom || !customTo)) return 'month';
+    return filter;
+  }
+
+  initThemePicker(function() {
+    renderAll(getActiveFilter());
+  });
+
+  // Initial render (theme is already applied)
+  renderAll('month');
+</script>
+</body>
+</html>

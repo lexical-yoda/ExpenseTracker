@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Accounts — Expense Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      padding-bottom: 40px;
+    }
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+    }
+    .nav-logo { font-family: var(--font-display); font-weight: 800; font-size: 1.3rem; color: var(--accent); letter-spacing: -0.5px; text-decoration: none; }
+    .nav-logout { color: var(--danger) !important; }
+    .nav-links { display: flex; gap: 4px; }
+    .nav-links a {
+      color: var(--muted); text-decoration: none; font-size: 0.75rem;
+      padding: 6px 12px; border-radius: 6px; transition: all 0.15s;
+      letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--surface2); }
+    .nav-links a.active { color: var(--accent); }
+
+    .container { max-width: 900px; margin: 0 auto; padding: 24px 20px; }
+
+    .page-header { margin-bottom: 24px; display: flex; align-items: baseline; justify-content: space-between; }
+    .page-title { font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; }
+
+    .add-btn {
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      font-weight: 700;
+      padding: 10px 20px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+    .add-btn:hover { background: var(--accent-dim); }
+
+    /* Account card */
+    .acct-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: border-color 0.15s;
+    }
+    .acct-card:hover { border-color: var(--surface2); }
+
+    .acct-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .acct-dot.savings { background: var(--savings); }
+    .acct-dot.cc { background: var(--cc); }
+
+    .acct-info { flex: 1; min-width: 0; }
+    .acct-name {
+      font-size: 0.9rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .acct-badge {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .acct-badge.savings { background: rgba(88,166,255,0.1); color: var(--savings); }
+    .acct-badge.cc { background: rgba(210,153,34,0.1); color: var(--cc); }
+
+    .acct-balance {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .acct-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .action-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--muted); font-size: 0.7rem; width: 28px; height: 28px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s; padding: 0;
+    }
+    .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .action-btn.del:hover { border-color: var(--danger); color: var(--danger); }
+
+    /* Empty state */
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .empty-title { font-family: var(--font-display); font-size: 1.1rem; color: var(--text); margin-bottom: 6px; }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 100;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 20px 20px 0 0;
+      padding: 24px 20px 40px;
+      width: 100%;
+      max-width: 540px;
+      max-height: 85vh;
+      overflow-y: auto;
+      animation: slide-up 0.2s ease;
+    }
+    @keyframes slide-up {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+    .modal-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      margin: 0 auto 20px;
+    }
+    .modal-title {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    /* Form elements */
+    .form-group { margin-bottom: 14px; }
+    label {
+      display: block;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+    input, select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      padding: 11px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+    }
+
+    .account-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .toggle-btn { position: relative; }
+    .toggle-btn input[type="radio"] { position: absolute; opacity: 0; width: 0; }
+    .toggle-btn label {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 11px; cursor: pointer; transition: all 0.15s;
+      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted); margin: 0;
+    }
+    .toggle-btn input[type="radio"]:checked + label {
+      border-color: var(--accent); color: var(--text); background: rgba(88,166,255,0.08);
+    }
+    .toggle-btn.savings input:checked + label { border-color: var(--savings); color: var(--savings); background: rgba(88,166,255,0.08); }
+    .toggle-btn.cc input:checked + label { border-color: var(--cc); color: var(--cc); background: rgba(210,153,34,0.08); }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+    .submit-btn {
+      width: 100%;
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-top: 8px;
+    }
+    .submit-btn:hover { background: var(--accent-dim); }
+    .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .submit-btn.danger { background: var(--danger); }
+    .submit-btn.cancel { background: var(--surface2); color: var(--text); }
+    .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+    .btn-row .submit-btn { margin-top: 0; }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 50px;
+      padding: 12px 20px;
+      font-size: 0.85rem;
+      z-index: 200;
+      transition: transform 0.3s ease;
+      white-space: nowrap;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.success { border-color: var(--success); color: var(--success); }
+    .toast.error { border-color: var(--danger); color: var(--danger); }
+
+    select option { background: var(--surface); }
+    [data-theme="light"] .submit-btn { color: #ffffff; }
+    [data-theme="light"] .submit-btn.cancel { color: var(--text); }
+    [data-theme="light"] .add-btn { color: #ffffff; }
+
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">Expense Manager</a>
+  <div class="nav-links">
+    <a href="/">Dashboard</a>
+    <a href="/manage">Manage</a>
+    <a href="/accounts" class="active">Accounts</a>
+    <a href="/logout" class="nav-logout">Log Out</a>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="page-title">Accounts</div>
+    <button class="add-btn" onclick="openAddModal()">+ Add Account</button>
+  </div>
+
+  {% if not accounts %}
+  <div class="empty">
+    <div class="empty-icon">🏦</div>
+    <div class="empty-title">No accounts yet</div>
+    <div>Add your first account to get started</div>
+  </div>
+  {% else %}
+
+  <div id="acct-list">
+    {% for acct in accounts %}
+      {% set bal = None %}
+      {% for b in balances %}
+        {% if b.id == acct.id %}
+          {% set bal = b %}
+        {% endif %}
+      {% endfor %}
+      <div class="acct-card" data-id="{{ acct.id }}">
+        <span class="acct-dot {{ 'savings' if acct.type == 'savings' else 'cc' }}"></span>
+        <div class="acct-info">
+          <div class="acct-name">
+            {{ acct.name }}
+            <span class="acct-badge {{ 'savings' if acct.type == 'savings' else 'cc' }}">{{ 'savings' if acct.type == 'savings' else 'credit' }}</span>
+          </div>
+          <div class="acct-balance">
+            {% if acct.type == 'savings' %}
+              Balance: ₹{{ "%.2f"|format(bal.current_balance if bal else acct.balance) }}
+            {% else %}
+              Limit: ₹{{ "%.2f"|format(acct.limit if acct.limit else 0) }} | Remaining: ₹{{ "%.2f"|format(bal.remaining if bal else 0) }}
+            {% endif %}
+          </div>
+        </div>
+        <div class="acct-actions">
+          <button class="action-btn" onclick="openEditModal({{ acct.id }}, '{{ acct.name }}', '{{ acct.type }}', {{ acct.balance if acct.type == 'savings' else acct.limit if acct.limit else 0 }})" title="Edit">&#9998;</button>
+          <button class="action-btn del" onclick="confirmDelete({{ acct.id }}, '{{ acct.name }}')" title="Delete">&#10005;</button>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- Add/Edit Account Modal -->
+<div class="modal-overlay" id="acct-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="acct-modal-title">Add Account</div>
+    <input type="hidden" id="acct-edit-id">
+
+    <div class="form-group">
+      <label for="acct-name">Account Name</label>
+      <input type="text" id="acct-name" placeholder="e.g. HDFC Savings" required autocomplete="off">
+    </div>
+
+    <div class="form-group" id="acct-type-group">
+      <label>Type</label>
+      <div class="account-toggle">
+        <div class="toggle-btn savings">
+          <input type="radio" name="acct-type" id="acct-type-savings" value="savings" checked>
+          <label for="acct-type-savings"><span class="dot"></span> Savings</label>
+        </div>
+        <div class="toggle-btn cc">
+          <input type="radio" name="acct-type" id="acct-type-credit" value="credit">
+          <label for="acct-type-credit"><span class="dot"></span> Credit</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-group" id="balance-group">
+      <label for="acct-balance">Balance</label>
+      <input type="number" id="acct-balance" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+    </div>
+
+    <div class="form-group" id="limit-group" style="display:none">
+      <label for="acct-limit">Limit</label>
+      <input type="number" id="acct-limit" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+    </div>
+
+    <button class="submit-btn" id="acct-save-btn">Save Account</button>
+  </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal-overlay" id="delete-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Delete Account</div>
+    <p id="delete-msg" style="color: var(--muted); font-size: 0.85rem; margin-bottom: 20px;">
+      Are you sure? This cannot be undone.
+    </p>
+    <div class="btn-row">
+      <button class="submit-btn cancel" onclick="closeDeleteModal()">Cancel</button>
+      <button class="submit-btn danger" id="confirm-delete-btn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let deleteTargetId = null;
+  let editMode = false;
+
+  // Toggle balance/limit fields based on type
+  document.querySelectorAll('input[name="acct-type"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      if (this.value === 'savings') {
+        document.getElementById('balance-group').style.display = 'block';
+        document.getElementById('limit-group').style.display = 'none';
+      } else {
+        document.getElementById('balance-group').style.display = 'none';
+        document.getElementById('limit-group').style.display = 'block';
+      }
+    });
+  });
+
+  // Toast helper
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // Open Add modal
+  function openAddModal() {
+    editMode = false;
+    document.getElementById('acct-modal-title').textContent = 'Add Account';
+    document.getElementById('acct-edit-id').value = '';
+    document.getElementById('acct-name').value = '';
+    document.getElementById('acct-type-savings').checked = true;
+    document.getElementById('acct-balance').value = '';
+    document.getElementById('acct-limit').value = '';
+    document.getElementById('balance-group').style.display = 'block';
+    document.getElementById('limit-group').style.display = 'none';
+    document.getElementById('acct-type-group').style.display = 'block';
+    document.getElementById('acct-save-btn').textContent = 'Save Account';
+    document.getElementById('acct-modal').classList.add('open');
+  }
+
+  // Open Edit modal
+  function openEditModal(id, name, type, value) {
+    editMode = true;
+    document.getElementById('acct-modal-title').textContent = 'Edit Account';
+    document.getElementById('acct-edit-id').value = id;
+    document.getElementById('acct-name').value = name;
+    document.getElementById('acct-save-btn').textContent = 'Save Changes';
+
+    // Hide type toggle in edit mode (type cannot change)
+    document.getElementById('acct-type-group').style.display = 'none';
+
+    if (type === 'savings') {
+      document.getElementById('acct-type-savings').checked = true;
+      document.getElementById('balance-group').style.display = 'block';
+      document.getElementById('limit-group').style.display = 'none';
+      document.getElementById('acct-balance').value = value;
+    } else {
+      document.getElementById('acct-type-credit').checked = true;
+      document.getElementById('balance-group').style.display = 'none';
+      document.getElementById('limit-group').style.display = 'block';
+      document.getElementById('acct-limit').value = value;
+    }
+
+    document.getElementById('acct-modal').classList.add('open');
+  }
+
+  // Close modal on overlay click
+  document.getElementById('acct-modal').addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('open');
+  });
+
+  // Save account
+  document.getElementById('acct-save-btn').addEventListener('click', async function() {
+    const btn = this;
+    const name = document.getElementById('acct-name').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    const type = document.querySelector('input[name="acct-type"]:checked').value;
+    const payload = { name };
+
+    if (editMode) {
+      // Edit mode: send balance or limit based on type
+      if (type === 'savings') {
+        payload.balance = parseFloat(document.getElementById('acct-balance').value) || 0;
+      } else {
+        payload.limit = parseFloat(document.getElementById('acct-limit').value) || 0;
+      }
+
+      const id = document.getElementById('acct-edit-id').value;
+      try {
+        const res = await fetch(`/api/accounts/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Account updated', 'success');
+          setTimeout(() => location.reload(), 600);
+        } else {
+          showToast(data.error || 'Update failed', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Save Changes';
+        }
+      } catch (err) {
+        showToast('Network error', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+      }
+    } else {
+      // Add mode
+      payload.type = type;
+      if (type === 'savings') {
+        payload.balance = parseFloat(document.getElementById('acct-balance').value) || 0;
+      } else {
+        payload.limit = parseFloat(document.getElementById('acct-limit').value) || 0;
+      }
+
+      try {
+        const res = await fetch('/api/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Account added', 'success');
+          setTimeout(() => location.reload(), 600);
+        } else {
+          showToast(data.error || 'Failed to add', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Save Account';
+        }
+      } catch (err) {
+        showToast('Network error', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save Account';
+      }
+    }
+  });
+
+  // Delete confirmation
+  function confirmDelete(id, name) {
+    deleteTargetId = id;
+    document.getElementById('delete-msg').textContent = `Delete account "${name}"? This cannot be undone.`;
+    document.getElementById('delete-modal').classList.add('open');
+  }
+
+  function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.remove('open');
+    deleteTargetId = null;
+  }
+
+  document.getElementById('delete-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeDeleteModal();
+  });
+
+  document.getElementById('confirm-delete-btn').addEventListener('click', async function() {
+    if (!deleteTargetId) return;
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Deleting...';
+
+    try {
+      const res = await fetch(`/api/accounts/${deleteTargetId}`, { method: 'DELETE', headers: { 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content } });
+      const data = await res.json();
+
+      if (data.success) {
+        showToast('Account deleted', 'success');
+        setTimeout(() => location.reload(), 600);
+      } else {
+        showToast(data.error || 'Delete failed', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+        closeDeleteModal();
+      }
+    } catch (err) {
+      showToast('Network error', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Delete';
+      closeDeleteModal();
+    }
+  });
+
+</script>
+<script src="/static/theme.js"></script>
+<script>initThemePicker();</script>
+</body>
+</html>

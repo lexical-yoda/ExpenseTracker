@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Setup — Expense Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .setup-card {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .setup-logo {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 2rem;
+      color: var(--accent);
+      letter-spacing: -1px;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    .setup-sub {
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 32px;
+      letter-spacing: 0.3px;
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+      padding-top: 8px;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 24px 0;
+    }
+
+    .form-group { margin-bottom: 14px; }
+
+    label {
+      display: block;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    input, select {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    select option { background: var(--surface); }
+
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+    }
+
+    /* Account card in form */
+    .acct-entry {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 10px;
+      position: relative;
+    }
+    .acct-entry .form-group { margin-bottom: 10px; }
+    .acct-entry .form-group:last-child { margin-bottom: 0; }
+    .acct-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    .acct-remove {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      width: 24px;
+      height: 24px;
+      font-size: 0.7rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      padding: 0;
+    }
+    .acct-remove:hover { border-color: var(--danger); color: var(--danger); }
+    .acct-num {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+
+    .add-acct-btn {
+      width: 100%;
+      background: none;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 16px;
+    }
+    .add-acct-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .submit-btn {
+      width: 100%;
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-top: 8px;
+      letter-spacing: 0.3px;
+    }
+    .submit-btn:hover { background: var(--accent-dim); transform: translateY(-1px); }
+    .submit-btn:active { transform: translateY(0); }
+
+    .error-msg {
+      background: rgba(248, 113, 113, 0.08);
+      border: 1px solid rgba(248, 113, 113, 0.2);
+      border-radius: var(--radius);
+      color: var(--danger);
+      font-size: 0.8rem;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+
+  </style>
+</head>
+<body>
+
+<button class="theme-toggle theme-toggle-fixed" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
+
+<div class="setup-card">
+  <div class="setup-logo">Expense Manager</div>
+  <div class="setup-sub">First-time setup — create your login and add accounts</div>
+
+  {% if error %}
+  <div class="error-msg">{{ error }}</div>
+  {% endif %}
+
+  <form method="POST" action="/setup" id="setup-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="section-title">Login Credentials</div>
+
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required autocomplete="off" placeholder="e.g. admin">
+    </div>
+
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="Min 6 characters">
+    </div>
+
+    <div class="form-group">
+      <label for="confirm_password">Confirm Password</label>
+      <input type="password" id="confirm_password" name="confirm_password" required autocomplete="new-password">
+    </div>
+
+    <hr class="divider">
+    <div class="section-title">Accounts</div>
+
+    <div id="accounts-list">
+      <div class="acct-entry" data-idx="0">
+        <div class="acct-num">Account 1</div>
+        <div class="form-group">
+          <label>Account Name</label>
+          <input type="text" name="acct_name_0" required placeholder="e.g. HDFC Savings">
+        </div>
+        <div class="acct-row">
+          <div class="form-group">
+            <label>Type</label>
+            <select name="acct_type_0" onchange="toggleAmountField(this)">
+              <option value="savings">Savings</option>
+              <option value="credit">Credit</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width: 140px;">
+            <label class="amt-label">Opening Balance</label>
+            <input type="number" name="acct_balance_0" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button type="button" class="add-acct-btn" id="add-acct-btn">+ Add Another Account</button>
+
+    <button type="submit" class="submit-btn">Complete Setup</button>
+  </form>
+</div>
+
+<script>
+  let acctCount = 1;
+
+  function toggleAmountField(selectEl) {
+    const entry = selectEl.closest('.acct-entry');
+    const idx = entry.dataset.idx;
+    const isCredit = selectEl.value === 'credit';
+    const label = entry.querySelector('.amt-label');
+    const balInput = entry.querySelector(`[name="acct_balance_${idx}"]`);
+    const limInput = entry.querySelector(`[name="acct_limit_${idx}"]`);
+
+    if (isCredit) {
+      label.textContent = 'Credit Limit';
+      if (balInput) {
+        balInput.name = `acct_limit_${idx}`;
+        balInput.placeholder = '0.00';
+      }
+    } else {
+      label.textContent = 'Opening Balance';
+      if (limInput) {
+        limInput.name = `acct_balance_${idx}`;
+        limInput.placeholder = '0.00';
+      }
+    }
+  }
+
+  document.getElementById('add-acct-btn').addEventListener('click', function() {
+    const idx = acctCount;
+    acctCount++;
+
+    const entry = document.createElement('div');
+    entry.className = 'acct-entry';
+    entry.dataset.idx = idx;
+    entry.innerHTML = `
+      <button type="button" class="acct-remove" onclick="this.closest('.acct-entry').remove()" title="Remove">&#10005;</button>
+      <div class="acct-num">Account ${idx + 1}</div>
+      <div class="form-group">
+        <label>Account Name</label>
+        <input type="text" name="acct_name_${idx}" required placeholder="e.g. SBI Credit Card">
+      </div>
+      <div class="acct-row">
+        <div class="form-group">
+          <label>Type</label>
+          <select name="acct_type_${idx}" onchange="toggleAmountField(this)">
+            <option value="savings">Savings</option>
+            <option value="credit">Credit</option>
+          </select>
+        </div>
+        <div class="form-group" style="min-width: 140px;">
+          <label class="amt-label">Opening Balance</label>
+          <input type="number" name="acct_balance_${idx}" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+        </div>
+      </div>
+    `;
+    document.getElementById('accounts-list').appendChild(entry);
+  });
+
+</script>
+<script src="/static/theme.js"></script>
+<script>initThemePicker();</script>
+</body>
+</html>

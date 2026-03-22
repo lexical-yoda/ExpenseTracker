@@ -1,0 +1,248 @@
+/* ── Base tokens (shared across all themes) ── */
+:root {
+  --radius: 6px;
+  --font-display: 'Syne', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+}
+
+/* ── Theme picker dropdown ── */
+.theme-picker {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  min-width: 160px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.theme-picker.open { display: block; }
+
+.theme-picker-title {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+  padding: 4px 8px 6px;
+}
+.theme-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+  text-align: left;
+}
+.theme-picker-item:hover { background: var(--surface2); }
+.theme-picker-item.active { color: var(--accent); }
+
+.theme-picker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* Per-palette accent colors for the dots (always visible regardless of current theme) */
+.theme-picker-item[data-palette="github"] .theme-picker-dot { background: #58a6ff; }
+.theme-picker-item[data-palette="indigo"] .theme-picker-dot { background: #818cf8; }
+.theme-picker-item[data-palette="nord"] .theme-picker-dot { background: #88c0d0; }
+.theme-picker-item[data-palette="emerald"] .theme-picker-dot { background: #34d399; }
+.theme-picker-item[data-palette="rose"] .theme-picker-dot { background: #f472b6; }
+.theme-picker-item[data-palette="amber"] .theme-picker-dot { background: #f59e0b; }
+.theme-picker-item[data-palette="ocean"] .theme-picker-dot { background: #38bdf8; }
+
+.theme-picker-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+.theme-picker-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.theme-picker-mode {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: all 0.1s;
+  text-align: center;
+}
+.theme-picker-mode:hover { border-color: var(--accent); color: var(--text); }
+.theme-picker-mode.active { border-color: var(--accent); color: var(--accent); background: var(--surface2); }
+
+/* ── Mobile responsive fixes ── */
+@media (max-width: 600px) {
+  /* Nav: logo on its own row, tabs centered below */
+  nav {
+    flex-wrap: wrap !important;
+    gap: 10px;
+    padding: 12px 16px !important;
+  }
+  nav .nav-logo {
+    width: 100%;
+    text-align: center;
+  }
+  nav .nav-links {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+  nav .nav-links a {
+    font-size: 0.68rem !important;
+    padding: 5px 8px !important;
+  }
+
+  /* Ensure content is centered and not overflowing */
+  .container {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  /* Page headers stack on mobile */
+  .page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+}
+
+/* ── Theme toggle button (shared) ── */
+.theme-toggle {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.85rem;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  padding: 0;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Standalone toggle for pages without a nav bar (login, setup) */
+.theme-toggle-fixed {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 50;
+}
+.theme-picker-fixed {
+  position: fixed !important;
+  top: 56px;
+  right: 16px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   THEME DEFINITIONS
+   Each theme has a dark and light variant. The attribute format is:
+     data-theme="<name>-dark" / data-theme="<name>-light"
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── GitHub ── */
+[data-theme="github-dark"] {
+  --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
+  --accent: #58a6ff; --accent-dim: #388bfd; --text: #c9d1d9; --muted: #8b949e;
+  --danger: #f85149; --success: #3fb950; --savings: #58a6ff; --cc: #d29922;
+}
+[data-theme="github-light"] {
+  --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2; --border: #d0d7de;
+  --accent: #0969da; --accent-dim: #0550ae; --text: #1f2328; --muted: #656d76;
+  --danger: #cf222e; --success: #1a7f37; --savings: #0969da; --cc: #9a6700;
+}
+
+/* ── Indigo & Slate ── */
+[data-theme="indigo-dark"] {
+  --bg: #0f0f1a; --surface: #1a1a2e; --surface2: #25253d; --border: #333358;
+  --accent: #818cf8; --accent-dim: #6366f1; --text: #e8e8f0; --muted: #7878a0;
+  --danger: #f87171; --success: #4ade80; --savings: #60a5fa; --cc: #fb923c;
+}
+[data-theme="indigo-light"] {
+  --bg: #f5f5f7; --surface: #ffffff; --surface2: #ebebf0; --border: #d1d1db;
+  --accent: #4f46e5; --accent-dim: #4338ca; --text: #1e1e2e; --muted: #6b6b8a;
+  --danger: #dc2626; --success: #16a34a; --savings: #2563eb; --cc: #ea580c;
+}
+
+/* ── Nord Aurora ── */
+[data-theme="nord-dark"] {
+  --bg: #2e3440; --surface: #3b4252; --surface2: #434c5e; --border: #4c566a;
+  --accent: #88c0d0; --accent-dim: #81a1c1; --text: #eceff4; --muted: #a0aab5;
+  --danger: #bf616a; --success: #a3be8c; --savings: #88c0d0; --cc: #ebcb8b;
+}
+[data-theme="nord-light"] {
+  --bg: #eceff4; --surface: #e5e9f0; --surface2: #d8dee9; --border: #c0c8d4;
+  --accent: #5e81ac; --accent-dim: #4c6a92; --text: #2e3440; --muted: #6a7585;
+  --danger: #bf616a; --success: #6b8f4a; --savings: #5e81ac; --cc: #c08b30;
+}
+
+/* ── Emerald Night ── */
+[data-theme="emerald-dark"] {
+  --bg: #0a1612; --surface: #0f211a; --surface2: #152b23; --border: #1e3a2e;
+  --accent: #34d399; --accent-dim: #10b981; --text: #d1e8df; --muted: #7ba898;
+  --danger: #f87171; --success: #34d399; --savings: #5eead4; --cc: #fbbf24;
+}
+[data-theme="emerald-light"] {
+  --bg: #f5faf7; --surface: #ffffff; --surface2: #ecf5f0; --border: #c6e3d4;
+  --accent: #059669; --accent-dim: #047857; --text: #0f2e1f; --muted: #5a7d6b;
+  --danger: #dc2626; --success: #059669; --savings: #0d9488; --cc: #b45309;
+}
+
+/* ── Rosewood ── */
+[data-theme="rose-dark"] {
+  --bg: #18101a; --surface: #231a26; --surface2: #2d2331; --border: #3d3342;
+  --accent: #f472b6; --accent-dim: #ec4899; --text: #ede5ef; --muted: #9a8d9f;
+  --danger: #fb7185; --success: #4ade80; --savings: #a78bfa; --cc: #fbbf24;
+}
+[data-theme="rose-light"] {
+  --bg: #fdf5f7; --surface: #ffffff; --surface2: #f5ebef; --border: #e4d4db;
+  --accent: #db2777; --accent-dim: #be185d; --text: #2a1520; --muted: #7d6070;
+  --danger: #e11d48; --success: #15803d; --savings: #7c3aed; --cc: #a16207;
+}
+
+/* ── Amber & Noir ── */
+[data-theme="amber-dark"] {
+  --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424; --border: #333333;
+  --accent: #f59e0b; --accent-dim: #d97706; --text: #e5e5e5; --muted: #8a8a8a;
+  --danger: #ef4444; --success: #22c55e; --savings: #3b82f6; --cc: #f59e0b;
+}
+[data-theme="amber-light"] {
+  --bg: #faf9f6; --surface: #ffffff; --surface2: #f0ede8; --border: #d6d0c6;
+  --accent: #b45309; --accent-dim: #92400e; --text: #1c1917; --muted: #78716c;
+  --danger: #dc2626; --success: #16a34a; --savings: #2563eb; --cc: #b45309;
+}
+
+/* ── Deep Ocean ── */
+[data-theme="ocean-dark"] {
+  --bg: #0b1222; --surface: #111d32; --surface2: #17253e; --border: #233552;
+  --accent: #38bdf8; --accent-dim: #0ea5e9; --text: #cbd5e1; --muted: #7c8fa4;
+  --danger: #f87171; --success: #4ade80; --savings: #38bdf8; --cc: #fb923c;
+}
+[data-theme="ocean-light"] {
+  --bg: #f0f7ff; --surface: #ffffff; --surface2: #e8f0fc; --border: #bfcfe0;
+  --accent: #0284c7; --accent-dim: #0369a1; --text: #0c1929; --muted: #5b7491;
+  --danger: #dc2626; --success: #15803d; --savings: #0284c7; --cc: #c2410c;
+}
