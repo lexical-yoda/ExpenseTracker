@@ -1,0 +1,13 @@
+{
+  "Groceries": ["Dairy", "Bakery", "Vegetables", "Fruits", "Meat & Fish", "Snacks", "Beverages"],
+  "Dining": ["Restaurant", "Cafe", "Takeaway", "Street Food"],
+  "Transport": ["Fuel", "Auto/Cab", "Bus/Train", "Parking", "Vehicle Maintenance"],
+  "Utilities": ["Electricity", "Water", "Internet", "Mobile Recharge", "Gas"],
+  "Shopping": ["Clothing", "Electronics", "Household", "Personal Care"],
+  "Health": ["Medicine", "Doctor", "Lab Tests", "Gym"],
+  "Entertainment": ["OTT Subscriptions", "Movies", "Games", "Events"],
+  "Education": ["Books", "Courses", "Stationery"],
+  "Rent & Housing": ["Rent", "Maintenance", "Repairs"],
+  "Savings & Investment": ["SIP", "FD", "Insurance Premium"],
+  "Miscellaneous": []
+}
