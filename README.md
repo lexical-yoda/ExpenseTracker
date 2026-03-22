@@ -34,6 +34,14 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 
 ## Quick start
 
+### Docker (recommended)
+
+```bash
+docker compose up -d
+```
+
+### Manual
+
 ```bash
 pip install -r requirements.txt
 python app.py
