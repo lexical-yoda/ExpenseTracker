@@ -382,6 +382,7 @@
     .txn-right { text-align: right; flex-shrink: 0; }
     .txn-amount { font-size: 0.95rem; font-weight: 500; color: var(--text); }
     .txn-amount.income { color: var(--success); }
+    .txn-amount.transfer { color: var(--muted); }
     .txn-date { font-size: 0.72rem; color: var(--muted); margin-top: 3px; }
 
     .expand-icon {
@@ -530,6 +531,7 @@
     .toggle-btn.cc input:checked + label { border-color: var(--cc); color: var(--cc); background: rgba(210,153,34,0.08); }
     .toggle-btn.expense input:checked + label { border-color: var(--danger); color: var(--danger); background: rgba(248,81,73,0.08); }
     .toggle-btn.income input:checked + label { border-color: var(--success); color: var(--success); background: rgba(63,185,80,0.08); }
+    .toggle-btn.transfer input:checked + label { border-color: var(--muted); color: var(--muted); background: rgba(139,148,158,0.08); }
 
     /* ── Toast ── */
     .toast {
@@ -607,6 +609,10 @@
             <div class="account-btn income">
               <input type="radio" name="txn_type" id="type-income" value="Income">
               <label for="type-income"><span class="dot"></span> Income</label>
+            </div>
+            <div class="account-btn transfer">
+              <input type="radio" name="txn_type" id="type-transfer" value="Transfer">
+              <label for="type-transfer"><span class="dot"></span> Transfer</label>
             </div>
           </div>
         </div>
@@ -720,7 +726,7 @@
             </div>
           </div>
           <div class="txn-right">
-            <div class="txn-amount {{ 'income' if txn.type == 'Income' else '' }}">{% if txn.type == 'Income' %}+{% else %}-{% endif %}₹{{ "%.2f"|format(txn.amount) }}</div>
+            <div class="txn-amount {{ 'income' if txn.type == 'Income' else 'transfer' if txn.type == 'Transfer' else '' }}">{% if txn.type == 'Income' %}+{% elif txn.type == 'Transfer' %}⇄{% else %}-{% endif %}₹{{ "%.2f"|format(txn.amount) }}</div>
             <div class="txn-date">{{ txn.date[8:] }}/{{ txn.date[5:7] }}</div>
           </div>
           <div class="txn-actions" onclick="event.stopPropagation()">
@@ -792,6 +798,10 @@
         <div class="toggle-btn income">
           <input type="radio" name="edit-type" id="edit-type-income" value="Income">
           <label for="edit-type-income"><span class="dot"></span> Income</label>
+        </div>
+        <div class="toggle-btn transfer">
+          <input type="radio" name="edit-type" id="edit-type-transfer" value="Transfer">
+          <label for="edit-type-transfer"><span class="dot"></span> Transfer</label>
         </div>
       </div>
     </div>
@@ -1089,6 +1099,8 @@
 
     if (txn.type === 'Income') {
       document.getElementById('edit-type-income').checked = true;
+    } else if (txn.type === 'Transfer') {
+      document.getElementById('edit-type-transfer').checked = true;
     } else {
       document.getElementById('edit-type-expense').checked = true;
     }

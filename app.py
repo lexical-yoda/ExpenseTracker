@@ -159,8 +159,9 @@ def setup():
                 default_cats = {
                     "Groceries": [], "Dining": [], "Transport": [], "Utilities": [],
                     "Shopping": [], "Health": [], "Entertainment": [], "Education": [],
-                    "Rent & Housing": [], "Savings & Investment": [], "Miscellaneous": [],
-                    "Salary": [], "Freelance": [], "Refund": []
+                    "Rent & Housing": [], "Savings & Investment": [], "Subscriptions": [],
+                    "Personal": [], "Fuel": [], "Miscellaneous": [],
+                    "Salary": [], "Freelance": [], "Refund": [], "Interest & Dividends": []
                 }
                 save_categories(default_cats)
 
@@ -277,8 +278,8 @@ def accounts_page():
 def api_add_transaction():
     data = request.get_json()
     txn_type = data.get('type', 'Expense')
-    if txn_type not in ('Expense', 'Income'):
-        return jsonify({'success': False, 'error': 'Type must be Expense or Income'}), 400
+    if txn_type not in ('Expense', 'Income', 'Transfer'):
+        return jsonify({'success': False, 'error': 'Type must be Expense, Income, or Transfer'}), 400
     try:
         txn_id = add_transaction(
             date_str=data['date'],
@@ -315,8 +316,8 @@ def api_get_transaction(txn_id):
 def api_update_transaction(txn_id):
     data = request.get_json()
     txn_type = data.get('type', 'Expense')
-    if txn_type not in ('Expense', 'Income'):
-        return jsonify({'success': False, 'error': 'Type must be Expense or Income'}), 400
+    if txn_type not in ('Expense', 'Income', 'Transfer'):
+        return jsonify({'success': False, 'error': 'Type must be Expense, Income, or Transfer'}), 400
     try:
         updated = update_transaction(txn_id, data)
         return jsonify({'success': True, 'transaction': updated})

@@ -101,10 +101,8 @@ Categories are shared across income and expense types — there is no separation
 
 One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month name + year via `strftime('%B %Y')`).
 
-**Row 4**: Column headers (row 4 is `TABLE_START`).
-**Row 5+**: Transaction data (row 5 is `DATA_START`).
-
-**Rows 1-3**: Legacy. Rows 1-2 previously stored CC limit and opening balance per-month. These are no longer used (balances moved to accounts.json). New sheets leave these empty.
+**Row 1**: Column headers (`TABLE_START = 1`).
+**Row 2+**: Transaction data (`DATA_START = 2`).
 
 **Active columns:**
 
@@ -118,9 +116,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 | F | 6 | Account | Full account name from accounts.json (e.g. "HDFC Savings") |
 | G | 7 | Amount | Always positive float, regardless of income/expense |
 | H | 8 | Parent ID | NULL for parent transactions. Set to another Txn ID for sub-items |
-| L | 12 | Type | `"Expense"` or `"Income"`. NULL treated as Expense |
-
-**Dead columns (I/J/K, indices 9/10/11)**: Previously stored running balances (Savings Balance, CC Accumulated, CC Remaining). No longer written or read. Kept physically for backward compatibility — the `COLUMNS` dict skips them.
+| I | 9 | Type | `"Expense"`, `"Income"`, or `"Transfer"`. NULL treated as Expense |
 
 ### Transaction hierarchy
 
@@ -166,7 +162,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 The Manage page combines the add form and transaction list on a single page.
 
 **Adding:**
-1. User fills the collapsible "New Transaction" form at the top — type (Expense/Income), date, description, account (dropdown), amount, category, sub-category
+1. User fills the collapsible "New Transaction" form at the top — type (Expense/Income/Transfer), date, description, account (dropdown), amount, category, sub-category
 2. JS POSTs to `/api/transactions` with JSON payload + CSRF token header
 3. `add_transaction()` in spreadsheet.py sanitizes fields, writes to the correct month sheet
 4. Success toast, form resets (page does not reload)
@@ -192,9 +188,11 @@ Legacy routes `/add`, `/add/sub/<id>`, and `/expenses` redirect to `/manage` for
 1. Loads accounts from `data/accounts.json`
 2. Reads ALL parent transactions from the spreadsheet
 3. For each account:
-   - **Savings**: `current_balance = opening_balance - total_expenses + total_income`
-   - **Credit**: `accumulated = total_expenses - total_income`, `remaining = limit - accumulated`
+   - **Savings**: `current_balance = opening_balance - (expenses + transfers) + income`
+   - **Credit**: `accumulated = (expenses + transfers) - income`, `remaining = limit - accumulated`
 4. Returns enriched account dicts
+
+**Transfer handling**: Transfers reduce account balances (money moved out) just like expenses, but are excluded from spending summary charts. This avoids double-counting in analytics while keeping balances accurate.
 
 This is called on every dashboard load and accounts page load. No caching.
 
@@ -321,7 +319,7 @@ Chart colors are derived from CSS variables via `getThemeColors()` — works aut
 
 ### Spreadsheet column backward compatibility
 
-The `COLUMNS` dict maps logical names to physical column indices. Columns I/J/K (9/10/11) are skipped — they contained running balance data in an earlier version. The `txn_type` field lives at column L (index 12) rather than column I (index 9) to avoid breaking existing spreadsheet data. New sheets still allocate 12 columns but leave I/J/K as width-1 placeholders.
+The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 9 columns (A–I) with no gaps. Type lives at column I (index 9). Earlier versions had dead balance columns at I/J/K with Type at L — these were cleaned up and the layout consolidated.
 
 ### `parse_row()` bounds checking
 

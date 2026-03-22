@@ -12,9 +12,6 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 XLSX_PATH = os.environ.get('EXPENSES_XLSX', os.path.join(DATA_DIR, 'expenses.xlsx'))
 ACCOUNTS_FILE = os.path.join(DATA_DIR, 'accounts.json')
 
-# Column layout stays the same physically for backward compat with existing sheets.
-# Columns I/J/K (balance columns) are no longer read or written — balances are
-# computed on the fly from accounts.json + transaction history.
 COLUMNS = {
     'date': 1,          # A
     'txn_id': 2,        # B
@@ -24,7 +21,7 @@ COLUMNS = {
     'account': 6,       # F — stores full account name
     'amount': 7,        # G
     'parent_id': 8,     # H
-    'txn_type': 12,     # L — kept at column 12 for backward compat
+    'txn_type': 9,      # I
 }
 
 TABLE_START = 1  # Column headers row
@@ -74,8 +71,8 @@ def _init_sheet(ws):
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     headers = ['Date', 'Txn ID', 'Description', 'Category', 'Sub-Category',
-               'Account', 'Amount (₹)', 'Parent ID', '', '', '', 'Type']
-    widths = [12, 8, 28, 16, 16, 24, 14, 10, 1, 1, 1, 10]
+               'Account', 'Amount (₹)', 'Parent ID', 'Type']
+    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10]
 
     for col, header in enumerate(headers, start=1):
         if not header:
@@ -308,6 +305,7 @@ def compute_account_balances():
         if t['type'] == 'Income':
             income_by_account[t['account']] += t['amount']
         else:
+            # Both Expense and Transfer reduce account balance
             spend_by_account[t['account']] += t['amount']
 
     result = []
@@ -338,6 +336,10 @@ def get_monthly_summary():
     by_account = defaultdict(float)
 
     for t in parents:
+        if t['type'] == 'Transfer':
+            continue  # Transfers excluded from summary charts
+        if t['type'] == 'Income':
+            continue  # Income excluded from spending charts
         month = t['date'][:7]
         monthly[month][t['category']] += t['amount']
         daily[t['date']] += t['amount']
@@ -349,5 +351,5 @@ def get_monthly_summary():
         'daily': dict(sorted(daily.items())),
         'by_category': dict(sorted(by_category.items(), key=lambda x: -x[1])),
         'by_account': dict(by_account),
-        'transactions': parents[:50],
+        'transactions': parents,
     }

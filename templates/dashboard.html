@@ -134,6 +134,7 @@
     .recent-meta { font-size: 0.65rem; color: var(--muted); margin-top: 2px; }
     .recent-amount { font-weight: 500; flex-shrink: 0; }
     .recent-amount.income { color: var(--success); }
+    .recent-amount.transfer { color: var(--muted); }
 
     /* Section title */
     .section-label {
@@ -356,7 +357,9 @@
       if (inRange(t.date)) {
         txnCount++;
         if (recentTxns.length < 8) recentTxns.push(t);
-        if (t.type === 'Income') {
+        if (t.type === 'Transfer') {
+          // Transfers don't count as income or expense
+        } else if (t.type === 'Income') {
           totalIncome += t.amount;
         } else {
           totalExpense += t.amount;
@@ -406,13 +409,16 @@
     container.innerHTML = txns.map(t => {
       const type = accountTypeMap[t.account] || 'savings';
       const isIncome = t.type === 'Income';
+      const isTransfer = t.type === 'Transfer';
+      const amtClass = isIncome ? 'income' : isTransfer ? 'transfer' : '';
+      const prefix = isIncome ? '+' : isTransfer ? '⇄' : '-';
       return `<div class="recent-item">
         <span class="recent-dot ${type}"></span>
         <div class="recent-info">
           <div class="recent-desc">${t.description}</div>
           <div class="recent-meta">${t.category} · ${t.date.slice(5)}</div>
         </div>
-        <div class="recent-amount ${isIncome ? 'income' : ''}">${isIncome ? '+' : '-'}${fmt(t.amount)}</div>
+        <div class="recent-amount ${amtClass}">${prefix}${fmt(t.amount)}</div>
       </div>`;
     }).join('');
   }

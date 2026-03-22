@@ -7,7 +7,7 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 ## Features
 
 - Multiple named accounts (savings & credit cards) with live balance tracking
-- Income and expense tracking
+- Income, expense, and transfer tracking
 - Sub-expense support — break down a transaction into individual items
 - Category & sub-category management from the frontend
 - Dashboard with spending charts, stat cards, and account balances
