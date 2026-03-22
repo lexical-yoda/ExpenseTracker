@@ -7,7 +7,7 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 ## Features
 
 - Multiple named accounts (savings & credit cards) with live balance tracking
-- Income, expense, and transfer tracking
+- Income, expense, and transfer tracking with per-transaction dashboard tracking toggle
 - Sub-expense support — break down a transaction into individual items
 - Category & sub-category management from the frontend
 - Dashboard with spending charts, stat cards, and account balances
@@ -119,6 +119,7 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 ## Notes
 
 - Only parent transactions count toward balance calculations — sub-items don't double-count
+- Transactions can be toggled as "tracked" or "untracked" — untracked ones still affect account balances but are excluded from dashboard charts and spending totals (useful for investments, internal transfers, etc.)
 - Transaction IDs are global integers across all months
 - The `.xlsx` is the single source of truth — you can edit it manually in a spreadsheet app
 - `categories.json` and `accounts.json` are updated live from the frontend — no restart needed

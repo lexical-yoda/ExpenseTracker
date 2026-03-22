@@ -361,7 +361,7 @@
           // Transfers don't count as income or expense
         } else if (t.type === 'Income') {
           totalIncome += t.amount;
-        } else {
+        } else if (t.track !== false) {
           totalExpense += t.amount;
           byCat[t.category] = (byCat[t.category] || 0) + t.amount;
           byAcc[t.account] = (byAcc[t.account] || 0) + t.amount;

@@ -413,6 +413,11 @@
     }
     .action-btn:hover { border-color: var(--accent); color: var(--accent); }
     .action-btn.del:hover { border-color: var(--danger); color: var(--danger); }
+    .action-btn.track { font-size: 0.85rem; }
+    .action-btn.track.tracked { color: var(--success); border-color: var(--success); }
+    .action-btn.track.untracked { color: var(--muted); border-color: var(--border); opacity: 0.5; }
+    .txn-card.untracked { opacity: 0.5; }
+    .txn-card.untracked .txn-desc { text-decoration: line-through; }
 
     /* ── Sub-items ── */
     .sub-items {
@@ -715,7 +720,7 @@
         </div>
       {% endif %}
 
-      <div class="txn-card" data-id="{{ txn.id }}" data-desc="{{ txn.description|lower }}" data-cat="{{ txn.category|lower }}">
+      <div class="txn-card{{ '' if txn.track else ' untracked' }}" data-id="{{ txn.id }}" data-desc="{{ txn.description|lower }}" data-cat="{{ txn.category|lower }}">
         <div class="txn-main" onclick="toggleCard(this.parentElement)">
           <span class="txn-dot {{ 'savings' if account_types.get(txn.account) == 'savings' else 'cc' }}"></span>
           <div class="txn-info">
@@ -730,6 +735,7 @@
             <div class="txn-date">{{ txn.date[8:] }}/{{ txn.date[5:7] }}</div>
           </div>
           <div class="txn-actions" onclick="event.stopPropagation()">
+            <button class="action-btn track {{ 'tracked' if txn.track else 'untracked' }}" onclick="toggleTrack({{ txn.id }}, {{ 'true' if txn.track else 'false' }})" title="{{ 'Tracked in dashboard' if txn.track else 'Not tracked in dashboard' }}">&#9673;</button>
             <button class="action-btn" onclick="openEditModal({{ txn.id }})" title="Edit">&#9998;</button>
             <button class="action-btn del" onclick="confirmDelete({{ txn.id }}, false)" title="Delete">&#10005;</button>
           </div>
@@ -1159,6 +1165,36 @@
   // ═══════════════════════════════════════════════════════════════════════════
   // DELETE MODAL
   // ═══════════════════════════════════════════════════════════════════════════
+
+  async function toggleTrack(txnId, currentlyTracked) {
+    const newTrack = !currentlyTracked;
+    try {
+      const res = await fetch(`/api/transactions/${txnId}/track`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ track: newTrack })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const card = document.querySelector(`.txn-card[data-id="${txnId}"]`);
+        const btn = card.querySelector('.action-btn.track');
+        if (newTrack) {
+          card.classList.remove('untracked');
+          btn.classList.remove('untracked');
+          btn.classList.add('tracked');
+          btn.title = 'Tracked in dashboard';
+        } else {
+          card.classList.add('untracked');
+          btn.classList.remove('tracked');
+          btn.classList.add('untracked');
+          btn.title = 'Not tracked in dashboard';
+        }
+        btn.setAttribute('onclick', `toggleTrack(${txnId}, ${newTrack})`);
+      }
+    } catch (err) {
+      alert('Failed to update track status');
+    }
+  }
 
   function confirmDelete(txnId, isSubItem) {
     deleteTargetId = txnId;

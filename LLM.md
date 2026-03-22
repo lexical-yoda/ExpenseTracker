@@ -117,6 +117,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 | G | 7 | Amount | Always positive float, regardless of income/expense |
 | H | 8 | Parent ID | NULL for parent transactions. Set to another Txn ID for sub-items |
 | I | 9 | Type | `"Expense"`, `"Income"`, or `"Transfer"`. NULL treated as Expense |
+| J | 10 | Track | `"Yes"` or `"No"`. Controls dashboard visibility. NULL treated as Yes |
 
 ### Transaction hierarchy
 
@@ -194,6 +195,8 @@ Legacy routes `/add`, `/add/sub/<id>`, and `/expenses` redirect to `/manage` for
 
 **Transfer handling**: Transfers reduce account balances (money moved out) just like expenses, but are excluded from spending summary charts. This avoids double-counting in analytics while keeping balances accurate.
 
+**Track toggle**: Each transaction has a `track` field (Yes/No). Untracked transactions still affect account balances but are excluded from dashboard charts, stat cards, and spending summaries. Useful for investments, SIP payments, or other planned outflows the user doesn't want in their spending analytics. Toggle is available per-transaction in the Manage page via a dot button (◉). Defaults to tracked (Yes) for new transactions.
+
 This is called on every dashboard load and accounts page load. No caching.
 
 ---
@@ -211,6 +214,7 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 | GET | `/api/transactions/<id>` | Get single transaction |
 | PUT | `/api/transactions/<id>` | Update transaction. Body: same as POST |
 | DELETE | `/api/transactions/<id>` | Delete transaction (cascades for parents) |
+| PATCH | `/api/transactions/<id>/track` | Toggle track status. Body: `{track: true/false}` |
 
 ### Categories
 
@@ -319,7 +323,7 @@ Chart colors are derived from CSS variables via `getThemeColors()` — works aut
 
 ### Spreadsheet column backward compatibility
 
-The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 9 columns (A–I) with no gaps. Type lives at column I (index 9). Earlier versions had dead balance columns at I/J/K with Type at L — these were cleaned up and the layout consolidated.
+The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 10 columns (A–J) with no gaps. Type lives at column I (index 9), Track at column J (index 10). Earlier versions had dead balance columns at I/J/K with Type at L — these were cleaned up and the layout consolidated.
 
 ### `parse_row()` bounds checking
 

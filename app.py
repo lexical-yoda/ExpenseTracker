@@ -289,7 +289,8 @@ def api_add_transaction():
             account=data['account'],
             amount=float(data['amount']),
             parent_id=data.get('parent_id') or None,
-            txn_type=txn_type
+            txn_type=txn_type,
+            track=data.get('track', True)
         )
         return jsonify({'success': True, 'id': txn_id})
     except Exception as e:
@@ -333,6 +334,18 @@ def api_delete_transaction(txn_id):
         return jsonify({'success': True, 'deleted_ids': deleted_ids})
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 404
+
+
+@app.route('/api/transactions/<int:txn_id>/track', methods=['PATCH'])
+@login_required
+def api_toggle_track(txn_id):
+    data = request.get_json()
+    track = data.get('track', True)
+    try:
+        updated = update_transaction(txn_id, {**get_transaction_by_id(txn_id), 'track': track})
+        return jsonify({'success': True, 'transaction': updated})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 # ── API: Categories ──────────────────────────────────────────────────────────

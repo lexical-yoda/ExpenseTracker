@@ -22,6 +22,7 @@ COLUMNS = {
     'amount': 7,        # G
     'parent_id': 8,     # H
     'txn_type': 9,      # I
+    'track': 10,        # J — Yes/No, controls dashboard visibility
 }
 
 TABLE_START = 1  # Column headers row
@@ -71,8 +72,8 @@ def _init_sheet(ws):
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     headers = ['Date', 'Txn ID', 'Description', 'Category', 'Sub-Category',
-               'Account', 'Amount (₹)', 'Parent ID', 'Type']
-    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10]
+               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track']
+    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8]
 
     for col, header in enumerate(headers, start=1):
         if not header:
@@ -129,6 +130,9 @@ def parse_row(row, sheet_name):
         date_str = str(date_val) if date_val else ''
 
     txn_type = val('txn_type')
+    track_val = val('track')
+    # Default to 'Yes' if column is empty or missing (backward compat)
+    tracked = True if track_val is None or str(track_val).strip().lower() in ('yes', 'true', '1', '') else False
 
     return {
         'id': txn_id,
@@ -140,6 +144,7 @@ def parse_row(row, sheet_name):
         'amount': float(val('amount') or 0),
         'parent_id': val('parent_id'),
         'type': txn_type or 'Expense',
+        'track': tracked,
         'sheet': sheet_name,
     }
 
@@ -171,7 +176,7 @@ def get_transaction_by_id(txn_id):
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
-def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense'):
+def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True):
     """Append a transaction to the correct month sheet. Returns txn_id."""
     d = datetime.strptime(date_str, '%Y-%m-%d').date()
     wb, ws = ensure_month_sheet(d.year, d.month)
@@ -195,6 +200,7 @@ def add_transaction(date_str, description, category, sub_category, account, amou
     ws_fresh.cell(row=next_row, column=COLUMNS['amount']).value = amount
     ws_fresh.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
     ws_fresh.cell(row=next_row, column=COLUMNS['txn_type']).value = txn_type
+    ws_fresh.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if track else 'No'
     ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
 
     save_workbook(wb)
@@ -239,6 +245,8 @@ def update_transaction(txn_id, data):
     ws.cell(row=row_num, column=COLUMNS['amount']).value = float(data['amount'])
     ws.cell(row=row_num, column=COLUMNS['amount']).number_format = '₹#,##0.00'
     ws.cell(row=row_num, column=COLUMNS['txn_type']).value = data.get('type', 'Expense')
+    if 'track' in data:
+        ws.cell(row=row_num, column=COLUMNS['track']).value = 'Yes' if data['track'] else 'No'
 
     save_workbook(wb)
     return get_transaction_by_id(txn_id)
@@ -340,6 +348,8 @@ def get_monthly_summary():
             continue  # Transfers excluded from summary charts
         if t['type'] == 'Income':
             continue  # Income excluded from spending charts
+        if not t['track']:
+            continue  # Untracked transactions excluded from charts
         month = t['date'][:7]
         monthly[month][t['category']] += t['amount']
         daily[t['date']] += t['amount']
