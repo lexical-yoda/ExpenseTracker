@@ -758,7 +758,7 @@
             </div>
           </div>
           {% endfor %}
-          <a href="/manage?parent={{ txn.id }}" class="add-sub-btn">+ add sub-expense</a>
+          <button class="add-sub-btn" onclick="event.stopPropagation(); openSubModal({{ txn.id }}, '{{ txn.description|e }}', {{ txn.amount }}, '{{ txn.account|e }}', '{{ txn.category|e }}', '{{ txn.date }}')">+ add sub-expense</button>
         </div>
       </div>
     {% endfor %}
@@ -855,6 +855,58 @@
     </div>
 
     <button class="submit-btn" id="edit-save-btn">Save Changes</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- SUB-EXPENSE MODAL                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="sub-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Add Sub-expense</div>
+    <div class="parent-badge" style="margin-bottom: 16px;">
+      <div>
+        <div class="parent-badge-label">Parent</div>
+        <div class="parent-badge-desc" id="sub-parent-desc"></div>
+      </div>
+      <div class="parent-badge-amount" id="sub-parent-amount"></div>
+    </div>
+    <input type="hidden" id="sub-parent-id">
+
+    <div class="form-group">
+      <label for="sub-date">Date</label>
+      <input type="date" id="sub-date" required>
+    </div>
+
+    <div class="form-group">
+      <label for="sub-desc">Description</label>
+      <input type="text" id="sub-desc" required autocomplete="off" placeholder="e.g. Rice 5kg">
+    </div>
+
+    <div class="form-group">
+      <label for="sub-amount">Amount (optional)</label>
+      <input type="number" id="sub-amount" step="0.01" min="0" inputmode="decimal" placeholder="Leave blank if unknown">
+    </div>
+
+    <div class="form-group">
+      <label for="sub-category">Category</label>
+      <select id="sub-category" required>
+        <option value="" disabled>Select category</option>
+        {% for cat in categories %}
+        <option value="{{ cat }}">{{ cat }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="sub-subcategory">Sub-category</label>
+      <select id="sub-subcategory">
+        <option value="">None</option>
+      </select>
+    </div>
+
+    <button class="submit-btn" id="sub-save-btn">Add Sub-expense</button>
   </div>
 </div>
 
@@ -1165,6 +1217,103 @@
   // ═══════════════════════════════════════════════════════════════════════════
   // DELETE MODAL
   // ═══════════════════════════════════════════════════════════════════════════
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SUB-EXPENSE MODAL
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function openSubModal(parentId, parentDesc, parentAmount, parentAccount, parentCategory, parentDate) {
+    const subParentEl = document.getElementById('sub-parent-id');
+    subParentEl.value = parentId;
+    subParentEl.dataset.account = parentAccount;
+    document.getElementById('sub-parent-desc').textContent = parentDesc;
+    document.getElementById('sub-parent-amount').textContent = '₹' + parentAmount.toFixed(2);
+    document.getElementById('sub-date').value = parentDate;
+    document.getElementById('sub-desc').value = '';
+    document.getElementById('sub-amount').value = '';
+
+    // Pre-select parent's category
+    const catSelect = document.getElementById('sub-category');
+    catSelect.value = parentCategory;
+    // Populate sub-categories
+    const subSelect = document.getElementById('sub-subcategory');
+    subSelect.innerHTML = '<option value="">None</option>';
+    if (categories[parentCategory]) {
+      categories[parentCategory].forEach(sc => {
+        subSelect.innerHTML += '<option value="' + sc + '">' + sc + '</option>';
+      });
+    }
+
+    document.getElementById('sub-modal').classList.add('open');
+    document.getElementById('sub-desc').focus();
+  }
+
+  function closeSubModal() {
+    document.getElementById('sub-modal').classList.remove('open');
+  }
+
+  document.getElementById('sub-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeSubModal();
+  });
+
+  document.getElementById('sub-category').addEventListener('change', function() {
+    const subSelect = document.getElementById('sub-subcategory');
+    subSelect.innerHTML = '<option value="">None</option>';
+    if (categories[this.value]) {
+      categories[this.value].forEach(sc => {
+        subSelect.innerHTML += '<option value="' + sc + '">' + sc + '</option>';
+      });
+    }
+  });
+
+  document.getElementById('sub-save-btn').addEventListener('click', async function() {
+    const btn = this;
+    const parentId = parseInt(document.getElementById('sub-parent-id').value);
+    const desc = document.getElementById('sub-desc').value.trim();
+    const date = document.getElementById('sub-date').value;
+    const amount = parseFloat(document.getElementById('sub-amount').value) || 0;
+    const category = document.getElementById('sub-category').value;
+    const subCategory = document.getElementById('sub-subcategory').value;
+
+    if (!desc || !date || !category) {
+      showToast('Please fill in description, date, and category', true);
+      return;
+    }
+
+    const parentAccount = document.getElementById('sub-parent-id').dataset.account;
+
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+
+    try {
+      const res = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({
+          date: date,
+          description: desc,
+          category: category,
+          sub_category: subCategory,
+          account: parentAccount,
+          amount: amount,
+          parent_id: parentId,
+          type: 'Expense'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Sub-expense added');
+        closeSubModal();
+        setTimeout(() => location.reload(), 500);
+      } else {
+        showToast(data.error || 'Failed', true);
+      }
+    } catch (err) {
+      showToast('Network error', true);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Add Sub-expense';
+  });
 
   async function toggleTrack(txnId, currentlyTracked) {
     const newTrack = !currentlyTracked;
