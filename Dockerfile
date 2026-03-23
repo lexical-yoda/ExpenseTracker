@@ -11,6 +11,7 @@ RUN mkdir -p /app/data && chown appuser:appuser /app/data
 COPY app.py spreadsheet.py ./
 COPY templates/ templates/
 COPY static/ static/
+COPY scripts/ scripts/
 
 USER appuser
 
