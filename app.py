@@ -22,20 +22,36 @@ app = Flask(__name__)
 
 # Persist secret key: check env, then .env file, then generate and save
 def _get_or_create_secret_key():
+    # Check environment variable first
     key = os.environ.get('SECRET_KEY')
     if key:
         return key
+    # Check .env file
     env_file = os.path.join(os.path.dirname(__file__), '.env')
     if os.path.exists(env_file):
         with open(env_file, 'r') as f:
             for line in f:
                 if line.strip().startswith('SECRET_KEY='):
                     return line.strip().split('=', 1)[1]
-    # Generate and persist
+    # Check data/ folder (writable in Docker)
+    data_env = os.path.join(os.path.dirname(__file__), 'data', '.secret_key')
+    if os.path.exists(data_env):
+        with open(data_env, 'r') as f:
+            return f.read().strip()
+    # Generate and persist to the first writable location
     key = os.urandom(32).hex()
-    os.makedirs(os.path.dirname(env_file) or '.', exist_ok=True)
-    with open(env_file, 'a') as f:
-        f.write(f"\nSECRET_KEY={key}\n")
+    for path in [env_file, data_env]:
+        try:
+            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+            with open(path, 'w') as f:
+                if path == env_file:
+                    f.write(f"SECRET_KEY={key}\n")
+                else:
+                    f.write(key)
+            return key
+        except PermissionError:
+            continue
+    # Fallback: in-memory only (sessions reset on restart)
     return key
 
 app.secret_key = _get_or_create_secret_key()
@@ -200,12 +216,15 @@ def setup():
             # Write .env if it doesn't exist (server config only)
             env_file = os.path.join(os.path.dirname(__file__), '.env')
             if not os.path.exists(env_file):
-                secret_key = os.urandom(32).hex()
-                with open(env_file, 'w') as f:
-                    f.write("# Expense Manager Configuration\n\n")
-                    f.write("HOST=0.0.0.0\n")
-                    f.write("PORT=5000\n\n")
-                    f.write(f"SECRET_KEY={secret_key}\n")
+                try:
+                    secret_key = os.urandom(32).hex()
+                    with open(env_file, 'w') as f:
+                        f.write("# Expense Manager Configuration\n\n")
+                        f.write("HOST=0.0.0.0\n")
+                        f.write("PORT=5000\n\n")
+                        f.write(f"SECRET_KEY={secret_key}\n")
+                except PermissionError:
+                    pass  # In Docker, .env is read-only; secret key handled by _get_or_create_secret_key()
 
             return redirect(url_for('login'))
 
