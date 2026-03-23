@@ -4,6 +4,11 @@
  * Stores preference in localStorage.
  */
 
+// PWA Service Worker registration
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 const THEMES = [
   { id: 'github',  label: 'GitHub' },
   { id: 'indigo',  label: 'Indigo' },

@@ -236,6 +236,20 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 | DELETE | `/api/transactions/<id>` | Delete transaction (cascades for parents) |
 | PATCH | `/api/transactions/<id>/track` | Toggle track status. Body: `{track: true/false}` |
 
+### Export
+
+| Method | URL | Purpose |
+|--------|-----|---------|
+| GET | `/api/export/csv` | Download transactions as CSV. Query params: `account`, `type`, `category`, `from`, `to`, `parents_only` |
+
+### Undo
+
+| Method | URL | Purpose |
+|--------|-----|---------|
+| POST | `/api/undo/delete` | Save transaction to undo stack before deletion. Body: `{txn_id}` |
+| POST | `/api/undo` | Undo last delete — re-creates the transaction and its sub-items |
+| GET | `/api/undo/status` | Check how many undo actions are available |
+
 ### Categories
 
 | Method | URL | Purpose |
@@ -336,8 +350,9 @@ Chart colors are derived from CSS variables via `getThemeColors()` — works aut
 
 - **Bcrypt** password hashing
 - **CSRF protection** via flask-wtf CSRFProtect — forms use hidden tokens, fetch() sends X-CSRFToken header
-- **Rate limiting** on login (5/min)
-- **Open redirect prevention** — `next` param rejects absolute URLs
+- **Rate limiting** on login and setup (5/min each)
+- **Open redirect prevention** — `next` param only allows relative paths starting with `/`, rejects `//`
+- **XSS prevention** — user content escaped via `esc()` helper in JS templates, Jinja2 auto-escaping in server templates
 - **Formula injection prevention** — `sanitize_cell()` prefixes `=`, `+`, `-`, `@` with `'` before writing to xlsx
 - **auth.json permissions** — `os.chmod(AUTH_FILE, 0o600)` after creation
 - **Session cookies** — HttpOnly, SameSite=Lax, Secure configurable via env var
@@ -378,6 +393,25 @@ The setup route creates `data/auth.json` (credentials), `data/accounts.json`, an
 ### Formula sanitization
 
 `sanitize_cell()` in `spreadsheet.py` prefixes any string starting with `=`, `+`, `-`, or `@` with a single quote `'`. Applied to description, category, sub-category, and account fields on both add and update paths.
+
+### Undo system
+
+In-memory stack (`UNDO_STACK` in app.py, max 20 entries). Before deleting a transaction, the frontend calls `POST /api/undo/delete` which snapshots the transaction and its children. `POST /api/undo` pops the last entry and re-creates the transaction via `add_transaction()`. The undo stack resets on app restart (intentional — no persistent undo history).
+
+### CSV export
+
+`GET /api/export/csv` generates a CSV from `get_all_transactions()` with optional query param filters (account, type, category, from/to dates, parents_only). Returns a `text/csv` response with `Content-Disposition` header for download.
+
+### PWA
+
+- `manifest.json` served from Flask route (not a static file) — allows dynamic configuration
+- Service worker (`/sw.js`) uses network-first strategy: tries live fetch, falls back to cache for static assets
+- Service worker registered in `static/theme.js` (loaded on every page)
+- PWA icons at `static/icon-192.png` and `static/icon-512.png`
+
+### Advanced filters (Manage page)
+
+Client-side filtering using `data-` attributes on transaction cards (`data-account`, `data-type`, `data-cat`, `data-date`). The `applyFilters()` function reads all filter inputs and hides/shows cards and day/month labels accordingly. Filters also apply to CSV export via query params.
 
 ---
 

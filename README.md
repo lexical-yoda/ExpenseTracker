@@ -17,6 +17,10 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 - 7 color themes (GitHub, Indigo, Nord, Emerald, Rose, Amber, Ocean) with dark/light modes
 - Login authentication with bcrypt, rate limiting, and CSRF protection
 - First-time setup wizard — creates login, accounts, and categories
+- **Advanced filtering** — filter transactions by account, type, category, and date range
+- **CSV export** — download filtered transactions as CSV
+- **Undo delete** — restore accidentally deleted transactions (up to 20 in session)
+- **PWA support** — installable on phone home screen, offline caching for static assets
 - Mobile-responsive layout with no theme flash on page load
 - Transactions sorted by date and ID, grouped by day with day-of-week headers
 
@@ -128,7 +132,9 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 │   └── expenses.xlsx   # Transaction data
 ├── static/
 │   ├── themes.css      # 7 color palettes (dark + light each)
-│   └── theme.js        # Theme picker logic + localStorage
+│   ├── theme.js        # Theme picker logic + localStorage + PWA service worker registration
+│   ├── icon-192.png    # PWA icon
+│   └── icon-512.png    # PWA icon
 └── templates/
     ├── setup.html      # First-time setup wizard
     ├── login.html      # Login page

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
@@ -629,6 +629,191 @@ def api_investment_prices():
                 'pnl_pct': pnl_pct,
             })
     return jsonify(results)
+
+
+# ── CSV Export ────────────────────────────────────────────────────────────────
+
+@app.route('/api/export/csv', methods=['GET'])
+@login_required
+def api_export_csv():
+    import csv
+    import io
+    transactions = get_all_transactions()
+    parents_only = request.args.get('parents_only', 'false') == 'true'
+    if parents_only:
+        transactions = [t for t in transactions if not t['parent_id']]
+
+    # Optional filters
+    account = request.args.get('account', '')
+    category = request.args.get('category', '')
+    txn_type = request.args.get('type', '')
+    date_from = request.args.get('from', '')
+    date_to = request.args.get('to', '')
+
+    if account:
+        transactions = [t for t in transactions if t['account'] == account]
+    if category:
+        transactions = [t for t in transactions if t['category'] == category]
+    if txn_type:
+        transactions = [t for t in transactions if t['type'] == txn_type]
+    if date_from:
+        transactions = [t for t in transactions if t['date'] >= date_from]
+    if date_to:
+        transactions = [t for t in transactions if t['date'] <= date_to]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Date', 'ID', 'Description', 'Category', 'Sub-Category', 'Account', 'Amount', 'Type', 'Track', 'Units', 'Parent ID'])
+    for t in transactions:
+        writer.writerow([
+            t['date'], t['id'], t['description'], t['category'],
+            t.get('sub_category', ''), t['account'], t['amount'],
+            t['type'], 'Yes' if t.get('track', True) else 'No',
+            t.get('units', ''), t.get('parent_id', '')
+        ])
+
+    today_str = date.today().strftime('%Y-%m-%d')
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=expenses_{today_str}.csv'}
+    )
+
+
+# ── Undo (transaction history) ───────────────────────────────────────────────
+
+UNDO_STACK = []  # In-memory stack of deleted/edited transactions for undo
+MAX_UNDO = 20
+
+
+@app.route('/api/undo/delete', methods=['POST'])
+@login_required
+def api_undo_delete():
+    """Store transaction data before deletion for potential undo."""
+    data = request.get_json()
+    txn_id = data.get('txn_id')
+    txn = get_transaction_by_id(txn_id)
+    if not txn:
+        return jsonify({'success': False, 'error': 'Transaction not found'}), 404
+
+    # Get children too
+    all_txns = get_all_transactions()
+    children = [t for t in all_txns if t.get('parent_id') == txn_id]
+
+    UNDO_STACK.append({
+        'action': 'delete',
+        'transaction': txn,
+        'children': children,
+        'timestamp': datetime.now().isoformat()
+    })
+    if len(UNDO_STACK) > MAX_UNDO:
+        UNDO_STACK.pop(0)
+
+    return jsonify({'success': True, 'undo_available': len(UNDO_STACK)})
+
+
+@app.route('/api/undo', methods=['POST'])
+@login_required
+def api_undo():
+    """Undo the last delete operation by re-adding the transaction."""
+    if not UNDO_STACK:
+        return jsonify({'success': False, 'error': 'Nothing to undo'}), 400
+
+    entry = UNDO_STACK.pop()
+
+    if entry['action'] == 'delete':
+        txn = entry['transaction']
+        try:
+            new_id = add_transaction(
+                date_str=txn['date'],
+                description=txn['description'],
+                category=txn['category'],
+                sub_category=txn.get('sub_category', ''),
+                account=txn['account'],
+                amount=txn['amount'],
+                parent_id=txn.get('parent_id'),
+                txn_type=txn.get('type', 'Expense'),
+                track=txn.get('track', True),
+                units=txn.get('units')
+            )
+            # Re-add children
+            for child in entry.get('children', []):
+                add_transaction(
+                    date_str=child['date'],
+                    description=child['description'],
+                    category=child['category'],
+                    sub_category=child.get('sub_category', ''),
+                    account=child['account'],
+                    amount=child['amount'],
+                    parent_id=new_id,
+                    txn_type=child.get('type', 'Expense'),
+                    track=child.get('track', True),
+                    units=child.get('units')
+                )
+            return jsonify({'success': True, 'new_id': new_id, 'undo_remaining': len(UNDO_STACK)})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
+    return jsonify({'success': False, 'error': 'Unknown undo action'}), 400
+
+
+@app.route('/api/undo/status', methods=['GET'])
+@login_required
+def api_undo_status():
+    return jsonify({'available': len(UNDO_STACK), 'items': [{'action': e['action'], 'description': e['transaction']['description'], 'timestamp': e['timestamp']} for e in reversed(UNDO_STACK)]})
+
+
+# ── PWA ──────────────────────────────────────────────────────────────────────
+
+@app.route('/manifest.json')
+def pwa_manifest():
+    manifest = {
+        'name': 'Expense Manager',
+        'short_name': 'Expenses',
+        'start_url': '/',
+        'display': 'standalone',
+        'background_color': '#0d1117',
+        'theme_color': '#0d1117',
+        'icons': [
+            {'src': '/static/icon-192.png', 'sizes': '192x192', 'type': 'image/png'},
+            {'src': '/static/icon-512.png', 'sizes': '512x512', 'type': 'image/png'}
+        ]
+    }
+    return jsonify(manifest)
+
+
+@app.route('/sw.js')
+def service_worker():
+    return Response(
+        '''const CACHE = 'em-v1';
+const STATIC = ['/static/themes.css', '/static/theme.js'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys =>
+    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+  ));
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  e.respondWith(
+    fetch(e.request).then(r => {
+      if (r.ok && STATIC.some(s => e.request.url.includes(s))) {
+        const clone = r.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+      }
+      return r;
+    }).catch(() => caches.match(e.request))
+  );
+});''',
+        mimetype='application/javascript'
+    )
 
 
 if __name__ == '__main__':

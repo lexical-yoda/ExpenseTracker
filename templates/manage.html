@@ -4,6 +4,8 @@
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0d1117">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>Manage — Expense Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -318,6 +320,48 @@
       transition: border-color 0.15s;
     }
     .search-wrap input:focus { border-color: var(--accent); }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .filter-select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      padding: 8px 10px;
+      outline: none;
+      flex: 1;
+      min-width: 100px;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+    .filter-action-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .filter-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .filter-select option { background: var(--surface); }
+
+    @media (max-width: 600px) {
+      .filter-bar { gap: 4px; }
+      .filter-select { min-width: 80px; font-size: 0.7rem; padding: 7px 8px; }
+    }
 
     /* ── Month group ── */
     .month-group { margin-bottom: 28px; }
@@ -710,11 +754,39 @@
 
   <div class="section-header">
     <div class="section-title">Transactions</div>
-    <div class="page-count" id="txn-count">{{ parents|length }} transactions</div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <button class="filter-action-btn" id="undo-btn" onclick="undoLast()" title="Undo last delete" style="display:none;">↩ Undo</button>
+      <button class="filter-action-btn" onclick="exportCSV()" title="Export to CSV">⬇ CSV</button>
+      <div class="page-count" id="txn-count">{{ parents|length }} transactions</div>
+    </div>
   </div>
 
   <div class="search-wrap">
     <input type="text" id="search" placeholder="Search description, category...">
+  </div>
+
+  <div class="filter-bar">
+    <select id="filter-account" class="filter-select">
+      <option value="">All Accounts</option>
+      {% for acct in accounts %}
+      <option value="{{ acct.name }}">{{ acct.name }}</option>
+      {% endfor %}
+    </select>
+    <select id="filter-type" class="filter-select">
+      <option value="">All Types</option>
+      <option value="Expense">Expense</option>
+      <option value="Income">Income</option>
+      <option value="Transfer">Transfer</option>
+    </select>
+    <select id="filter-category" class="filter-select">
+      <option value="">All Categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat }}">{{ cat }}</option>
+      {% endfor %}
+    </select>
+    <input type="date" id="filter-from" class="filter-select" title="From date">
+    <input type="date" id="filter-to" class="filter-select" title="To date">
+    <button class="filter-action-btn" onclick="clearFilters()">Clear</button>
   </div>
 
   {% if not parents %}
@@ -746,7 +818,7 @@
         <div class="day-label">{{ txn.date|dayname }}, {{ txn.date[8:] }}/{{ txn.date[5:7] }}/{{ txn.date[:4] }}</div>
       {% endif %}
 
-      <div class="txn-card{{ '' if txn.track else ' untracked' }}" data-id="{{ txn.id }}" data-desc="{{ txn.description|lower }}" data-cat="{{ txn.category|lower }}">
+      <div class="txn-card{{ '' if txn.track else ' untracked' }}" data-id="{{ txn.id }}" data-desc="{{ txn.description|lower }}" data-cat="{{ txn.category }}" data-account="{{ txn.account }}" data-type="{{ txn.type }}" data-date="{{ txn.date }}">
         <div class="txn-main" onclick="toggleCard(this.parentElement)">
           <span class="txn-dot {{ 'savings' if account_types.get(txn.account) == 'savings' else 'cc' }}"></span>
           <div class="txn-info">
@@ -1233,19 +1305,132 @@
     card.classList.toggle('expanded');
   }
 
-  document.getElementById('search')?.addEventListener('input', function() {
-    const q = this.value.toLowerCase().trim();
+  // ── Filtering ──
+  function applyFilters() {
+    const q = (document.getElementById('search')?.value || '').toLowerCase().trim();
+    const fAccount = document.getElementById('filter-account')?.value || '';
+    const fType = document.getElementById('filter-type')?.value || '';
+    const fCategory = document.getElementById('filter-category')?.value || '';
+    const fFrom = document.getElementById('filter-from')?.value || '';
+    const fTo = document.getElementById('filter-to')?.value || '';
+
     const cards = document.querySelectorAll('.txn-card');
+    const dayLabels = document.querySelectorAll('.day-label');
+    const monthLabels = document.querySelectorAll('.month-label');
     let visible = 0;
+
     cards.forEach(card => {
-      const desc = card.dataset.desc || '';
+      const desc = (card.dataset.desc || '').toLowerCase();
       const cat = card.dataset.cat || '';
-      const match = !q || desc.includes(q) || cat.includes(q);
+      const account = card.dataset.account || '';
+      const type = card.dataset.type || '';
+      const txnDate = card.dataset.date || '';
+
+      let match = true;
+      if (q && !desc.includes(q) && !cat.toLowerCase().includes(q)) match = false;
+      if (fAccount && account !== fAccount) match = false;
+      if (fType && type !== fType) match = false;
+      if (fCategory && cat !== fCategory) match = false;
+      if (fFrom && txnDate < fFrom) match = false;
+      if (fTo && txnDate > fTo) match = false;
+
       card.style.display = match ? '' : 'none';
       if (match) visible++;
     });
+
+    // Hide day/month labels with no visible cards
+    dayLabels.forEach(dl => {
+      let next = dl.nextElementSibling;
+      let hasVisible = false;
+      while (next && !next.classList.contains('day-label') && !next.classList.contains('month-label')) {
+        if (next.classList.contains('txn-card') && next.style.display !== 'none') { hasVisible = true; break; }
+        next = next.nextElementSibling;
+      }
+      dl.style.display = hasVisible ? '' : 'none';
+    });
+    monthLabels.forEach(ml => {
+      let next = ml.nextElementSibling;
+      let hasVisible = false;
+      while (next && !next.classList.contains('month-label')) {
+        if (next.classList.contains('txn-card') && next.style.display !== 'none') { hasVisible = true; break; }
+        next = next.nextElementSibling;
+      }
+      ml.style.display = hasVisible ? '' : 'none';
+    });
+
     document.getElementById('txn-count').textContent = visible + ' transactions';
-  });
+  }
+
+  document.getElementById('search')?.addEventListener('input', applyFilters);
+  document.getElementById('filter-account')?.addEventListener('change', applyFilters);
+  document.getElementById('filter-type')?.addEventListener('change', applyFilters);
+  document.getElementById('filter-category')?.addEventListener('change', applyFilters);
+  document.getElementById('filter-from')?.addEventListener('change', applyFilters);
+  document.getElementById('filter-to')?.addEventListener('change', applyFilters);
+
+  function clearFilters() {
+    document.getElementById('search').value = '';
+    document.getElementById('filter-account').value = '';
+    document.getElementById('filter-type').value = '';
+    document.getElementById('filter-category').value = '';
+    document.getElementById('filter-from').value = '';
+    document.getElementById('filter-to').value = '';
+    applyFilters();
+  }
+
+  // ── CSV Export ──
+  function exportCSV() {
+    const params = new URLSearchParams();
+    const fAccount = document.getElementById('filter-account')?.value;
+    const fType = document.getElementById('filter-type')?.value;
+    const fCategory = document.getElementById('filter-category')?.value;
+    const fFrom = document.getElementById('filter-from')?.value;
+    const fTo = document.getElementById('filter-to')?.value;
+    if (fAccount) params.set('account', fAccount);
+    if (fType) params.set('type', fType);
+    if (fCategory) params.set('category', fCategory);
+    if (fFrom) params.set('from', fFrom);
+    if (fTo) params.set('to', fTo);
+    window.location.href = '/api/export/csv?' + params.toString();
+  }
+
+  // ── Undo ──
+  let undoAvailable = 0;
+
+  function checkUndoStatus() {
+    fetch('/api/undo/status').then(r => r.json()).then(data => {
+      undoAvailable = data.available;
+      const btn = document.getElementById('undo-btn');
+      if (btn) btn.style.display = undoAvailable > 0 ? '' : 'none';
+    }).catch(() => {});
+  }
+
+  async function undoLast() {
+    const btn = document.getElementById('undo-btn');
+    btn.textContent = '↩ Undoing...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/undo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: '{}'
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Undo successful ✓', 'success');
+        setTimeout(() => location.reload(), 500);
+      } else {
+        showToast(data.error || 'Undo failed', 'error');
+      }
+    } catch (err) {
+      showToast('Network error', 'error');
+    }
+    btn.textContent = '↩ Undo';
+    btn.disabled = false;
+    checkUndoStatus();
+  }
+
+  checkUndoStatus();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // EDIT MODAL
@@ -1497,7 +1682,7 @@
     const msg = isSubItem
       ? 'Delete this sub-item?'
       : 'Delete this transaction and all its sub-items?';
-    document.getElementById('delete-msg').textContent = msg + ' This cannot be undone.';
+    document.getElementById('delete-msg').textContent = msg + ' You can undo this action.';
     document.getElementById('delete-modal').classList.add('open');
   }
 
@@ -1517,6 +1702,13 @@
     btn.textContent = 'Deleting...';
 
     try {
+      // Save to undo stack before deleting
+      await fetch('/api/undo/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ txn_id: deleteTargetId })
+      });
+
       const res = await fetch(`/api/transactions/${deleteTargetId}`, {
         method: 'DELETE',
         headers: { 'X-CSRFToken': csrfToken }
@@ -1524,7 +1716,7 @@
       const data = await res.json();
 
       if (data.success) {
-        showToast('Deleted', 'success');
+        showToast('Deleted — click Undo to restore', 'success');
         setTimeout(() => location.reload(), 600);
       } else {
         showToast(data.error || 'Delete failed', 'error');
