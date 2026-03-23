@@ -10,6 +10,7 @@
   <title>Accounts — Expense Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="/static/interactions.js"></script>
   <link rel="stylesheet" href="/static/themes.css">
   <script>document.documentElement.setAttribute('data-theme',(localStorage.getItem('em-palette')||'github')+'-'+(localStorage.getItem('em-mode')||'dark'));</script>
   <style>
@@ -279,6 +280,7 @@
   <a href="/" class="nav-logo">Expense Manager</a>
   <div class="nav-links">
     <a href="/">Dashboard</a>
+    <a href="/analytics">Analytics</a>
     <a href="/manage">Manage</a>
     <a href="/accounts" class="active">Accounts</a>
     <a href="/logout" class="nav-logout">Log Out</a>
@@ -329,7 +331,7 @@
         </div>
         <div class="acct-actions">
           <button class="action-btn" onclick="openEditModal(this.dataset)" data-acct='{{ acct|tojson|e }}' title="Edit">&#9998;</button>
-          <button class="action-btn del" onclick="confirmDelete({{ acct.id }}, '{{ acct.name }}')" title="Delete">&#10005;</button>
+          <button class="action-btn del" onclick="confirmDelete({{ acct.id }}, {{ acct.name|tojson }})" title="Delete">&#10005;</button>
         </div>
       </div>
     {% endfor %}
@@ -483,13 +485,7 @@
     radio.addEventListener('change', function() { updateTypeFields('investment', this.value); });
   });
 
-  // Toast helper
-  function showToast(msg, type) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = `toast ${type} show`;
-    setTimeout(() => t.classList.remove('show'), 2500);
-  }
+  // showToast is provided by interactions.js
 
   // Open Add modal
   function openAddModal() {
@@ -703,6 +699,6 @@
 
 </script>
 <script src="/static/theme.js"></script>
-<script>initThemePicker();</script>
+<script>initThemePicker(); initPullToRefresh();</script>
 </body>
 </html>

@@ -4,10 +4,7 @@
  * Stores preference in localStorage.
  */
 
-// PWA Service Worker registration
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
-}
+// SW registration handled by interactions.js
 
 const THEMES = [
   { id: 'github',  label: 'GitHub' },

@@ -34,6 +34,7 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 | `/setup` | First-time setup (create login & accounts) |
 | `/login` | Sign in |
 | `/dashboard` | Charts, stats, account balances, investments & net worth (home page) |
+| `/analytics` | Spending trends, category trends, day-of-week patterns, merchant analysis, spending velocity |
 | `/manage` | Add transactions + transaction list with edit/delete/track toggle |
 | `/accounts` | Manage accounts (savings, credit, investment/ETF, fixed deposits) |
 
@@ -132,13 +133,16 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 │   └── expenses.xlsx   # Transaction data
 ├── static/
 │   ├── themes.css      # 7 color palettes (dark + light each)
-│   ├── theme.js        # Theme picker logic + localStorage + PWA service worker registration
+│   ├── theme.js        # Theme picker logic + localStorage
+│   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, PWA SW
+│   ├── sw.js           # Service worker (network-first for data, cache-first for static)
 │   ├── icon-192.png    # PWA icon
 │   └── icon-512.png    # PWA icon
 └── templates/
     ├── setup.html      # First-time setup wizard
     ├── login.html      # Login page
     ├── dashboard.html  # Plotly charts, stats, investments & net worth (home page)
+    ├── analytics.html  # Spending trends, category analysis, merchant breakdown
     ├── manage.html     # Add transactions + transaction list with sub-expense modal
     └── accounts.html   # Account management (savings, credit, investment, FD)
 ```

@@ -19,12 +19,32 @@ from datetime import date, datetime
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+
+# Persist secret key: check env, then .env file, then generate and save
+def _get_or_create_secret_key():
+    key = os.environ.get('SECRET_KEY')
+    if key:
+        return key
+    env_file = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_file):
+        with open(env_file, 'r') as f:
+            for line in f:
+                if line.strip().startswith('SECRET_KEY='):
+                    return line.strip().split('=', 1)[1]
+    # Generate and persist
+    key = os.urandom(32).hex()
+    os.makedirs(os.path.dirname(env_file) or '.', exist_ok=True)
+    with open(env_file, 'a') as f:
+        f.write(f"\nSECRET_KEY={key}\n")
+    return key
+
+app.secret_key = _get_or_create_secret_key()
 # SECURE=True only when behind HTTPS (nginx/reverse proxy sets X-Forwarded-Proto)
 # For local HTTP dev, this stays False so cookies actually work
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SECURE_COOKIES', 'false').lower() == 'true'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['REMEMBER_COOKIE_DURATION'] = 2592000  # 30 days
 
 limiter = Limiter(get_remote_address, app=app, default_limits=[])
 csrf = CSRFProtect(app)
@@ -202,6 +222,8 @@ def logout():
 # ── Categories ────────────────────────────────────────────────────────────────
 
 def load_categories():
+    if not os.path.exists(CATEGORIES_FILE):
+        return {}
     with open(CATEGORIES_FILE, 'r') as f:
         return json.load(f)
 
@@ -214,6 +236,8 @@ def save_categories(data):
 # ── Accounts ──────────────────────────────────────────────────────────────────
 
 def load_accounts():
+    if not os.path.exists(ACCOUNTS_FILE):
+        return []
     with open(ACCOUNTS_FILE, 'r') as f:
         return json.load(f)
 
@@ -277,7 +301,14 @@ def dashboard():
     summary = get_monthly_summary()
     accounts = load_accounts()
     balances = compute_account_balances()
-    return render_template('dashboard.html', summary=json.dumps(summary), accounts=json.dumps(accounts), balances=json.dumps(balances))
+    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances)
+
+
+@app.route('/analytics')
+@login_required
+def analytics():
+    summary = get_monthly_summary()
+    return render_template('analytics.html', summary=summary)
 
 
 @app.route('/accounts')
@@ -313,7 +344,7 @@ def api_add_transaction():
         )
         return jsonify({'success': True, 'id': txn_id})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': 'Operation failed'}), 400
 
 
 @app.route('/api/transactions', methods=['GET'])
@@ -342,7 +373,7 @@ def api_update_transaction(txn_id):
         updated = update_transaction(txn_id, data)
         return jsonify({'success': True, 'transaction': updated})
     except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': 'Operation failed'}), 400
 
 
 @app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
@@ -352,7 +383,7 @@ def api_delete_transaction(txn_id):
         deleted_ids = delete_transaction(txn_id)
         return jsonify({'success': True, 'deleted_ids': deleted_ids})
     except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 404
+        return jsonify({'success': False, 'error': 'Operation failed'}), 404
 
 
 @app.route('/api/transactions/<int:txn_id>/track', methods=['PATCH'])
@@ -361,10 +392,13 @@ def api_toggle_track(txn_id):
     data = request.get_json()
     track = data.get('track', True)
     try:
-        updated = update_transaction(txn_id, {**get_transaction_by_id(txn_id), 'track': track})
+        txn = get_transaction_by_id(txn_id)
+        if not txn:
+            return jsonify({'success': False, 'error': 'Transaction not found'}), 404
+        updated = update_transaction(txn_id, {**txn, 'track': track})
         return jsonify({'success': True, 'transaction': updated})
-    except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'Operation failed'}), 400
 
 
 # ── API: Categories ──────────────────────────────────────────────────────────
@@ -521,14 +555,25 @@ def api_get_summary():
 
 # ── Investment price fetching ────────────────────────────────────────────────
 
+_price_cache = {}  # {ticker: (price, timestamp)}
+PRICE_CACHE_TTL = 300  # 5 minutes
+
 def fetch_yahoo_price(ticker):
-    """Fetch current price from Yahoo Finance. Returns float or None."""
+    """Fetch current price from Yahoo Finance with 5-min cache. Returns float or None."""
+    import time
+    now = time.time()
+    if ticker in _price_cache:
+        price, ts = _price_cache[ticker]
+        if now - ts < PRICE_CACHE_TTL:
+            return price
     try:
         url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1d'
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
-            return data['chart']['result'][0]['meta']['regularMarketPrice']
+            price = data['chart']['result'][0]['meta']['regularMarketPrice']
+            _price_cache[ticker] = (price, now)
+            return price
     except Exception:
         return None
 
@@ -752,7 +797,7 @@ def api_undo():
                 )
             return jsonify({'success': True, 'new_id': new_id, 'undo_remaining': len(UNDO_STACK)})
         except Exception as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'success': False, 'error': 'Operation failed'}), 400
 
     return jsonify({'success': False, 'error': 'Unknown undo action'}), 400
 
@@ -769,14 +814,16 @@ def api_undo_status():
 def pwa_manifest():
     manifest = {
         'name': 'Expense Manager',
-        'short_name': 'Expenses',
+        'short_name': 'ExpenseManager',
+        'description': 'Personal expense tracker with multi-account support',
         'start_url': '/',
         'display': 'standalone',
         'background_color': '#0d1117',
         'theme_color': '#0d1117',
+        'orientation': 'portrait',
         'icons': [
-            {'src': '/static/icon-192.png', 'sizes': '192x192', 'type': 'image/png'},
-            {'src': '/static/icon-512.png', 'sizes': '512x512', 'type': 'image/png'}
+            {'src': '/static/icon-192.png', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any maskable'},
+            {'src': '/static/icon-512.png', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'any maskable'}
         ]
     }
     return jsonify(manifest)
@@ -784,36 +831,10 @@ def pwa_manifest():
 
 @app.route('/sw.js')
 def service_worker():
-    return Response(
-        '''const CACHE = 'em-v1';
-const STATIC = ['/static/themes.css', '/static/theme.js'];
-
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-  ));
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(
-    fetch(e.request).then(r => {
-      if (r.ok && STATIC.some(s => e.request.url.includes(s))) {
-        const clone = r.clone();
-        caches.open(CACHE).then(c => c.put(e.request, clone));
-      }
-      return r;
-    }).catch(() => caches.match(e.request))
-  );
-});''',
-        mimetype='application/javascript'
-    )
+    sw_path = os.path.join(app.static_folder, 'sw.js')
+    with open(sw_path, 'r') as f:
+        return Response(f.read(), mimetype='application/javascript',
+                       headers={'Service-Worker-Allowed': '/', 'Cache-Control': 'no-cache'})
 
 
 if __name__ == '__main__':

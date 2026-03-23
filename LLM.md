@@ -37,11 +37,16 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 │   └── expenses.xlsx   # Transaction data (one sheet per month)
 ├── static/
 │   ├── themes.css      # All theme definitions + theme picker + mobile nav styles
-│   └── theme.js        # Theme picker logic, palette/mode switching, localStorage
+│   ├── theme.js        # Theme picker logic, palette/mode switching, localStorage
+│   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, relative timestamps, PWA SW registration
+│   ├── sw.js           # Service worker (network-first for data, cache-first for static)
+│   ├── icon-192.png    # PWA icon (192x192)
+│   └── icon-512.png    # PWA icon (512x512)
 └── templates/
     ├── setup.html      # First-time setup wizard
     ├── login.html      # Login page
-    ├── dashboard.html  # Plotly charts, stats, account balances (home page)
+    ├── dashboard.html  # Plotly charts, stats, account balances, investments (home page)
+    ├── analytics.html  # Spending trends, category trends, merchant analysis, velocity
     ├── manage.html     # Combined add form + transaction list with edit/delete
     └── accounts.html   # Account management (CRUD)
 ```
@@ -165,7 +170,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 ### Navigation
 
 - Logo ("Expense Manager") links to `/` which redirects to dashboard (home page)
-- Nav links: `Manage`, `Accounts`, theme picker button, `Log Out`
+- Nav links: `Dashboard`, `Analytics`, `Manage`, `Accounts`, theme picker button, `Log Out`
 - On mobile (< 600px), nav wraps: logo on its own row, links centered below
 
 ### Managing transactions (`/manage`)
@@ -217,7 +222,7 @@ Legacy routes `/add`, `/add/sub/<id>`, and `/expenses` redirect to `/manage` for
 
 **FD value calculation**: `calculate_fd_value()` in app.py uses compound interest formula: `A = P(1 + r/n)^(nt)`. Returns current value (based on elapsed time), maturity value, interest earned, days remaining, and matured status.
 
-This is called on every dashboard load and accounts page load. No caching.
+This is called on every dashboard load and accounts page load. Yahoo Finance prices are cached for 5 minutes; FD calculations are computed fresh each time (no external API call).
 
 ---
 
@@ -289,15 +294,17 @@ Theme definitions and logic are centralized — not duplicated per template:
 
 - **`static/themes.css`**: All 7 palettes (dark + light = 14 `[data-theme]` blocks), theme picker dropdown styles, theme toggle button styles, mobile nav responsive rules
 - **`static/theme.js`**: `initThemePicker(onChangeCallback)` — creates the dropdown, handles palette/mode switching, persists to localStorage (`em-palette`, `em-mode`)
+- **`static/interactions.js`**: Shared UI utilities loaded on all authenticated pages — animated stat counters (`animateCounter`, `animateStat`), toast notifications (`showToast`), pull-to-refresh (mobile), auto-refresh (60s polling), relative timestamps (`timeAgo`), PWA service worker registration
 
 ### Templates
 
 All templates are standalone HTML files (no base template / inheritance). Each includes:
+- `<script src="/static/interactions.js">` in `<head>` for shared utilities
 - `<link rel="stylesheet" href="/static/themes.css">` for theme definitions
+- Inline theme initialization: `<script>document.documentElement.setAttribute('data-theme', ...)</script>` to prevent flash
 - Page-specific CSS in a `<style>` block using CSS custom properties
-- `<script src="/static/theme.js">` + `initThemePicker()` call
+- `<script src="/static/theme.js">` + `initThemePicker()` call before `</body>`
 - CSRF meta tag: `<meta name="csrf-token" content="{{ csrf_token() }}">`
-- `<html lang="en">` (no data-theme attribute — set by JS on load)
 
 ### Theming System
 
@@ -344,6 +351,22 @@ Two-column chart grid on desktop (> 900px), single column on mobile. Container m
 
 Chart colors are derived from CSS variables via `getThemeColors()` — works automatically with any palette. Theme is applied via `initTheme()` before the initial `renderAll()` call to avoid flash of unstyled charts.
 
+**Clickable chart**: Clicking a point on the Daily Spending chart navigates to `/manage?date=YYYY-MM-DD`, which auto-filters the transaction list to that date.
+
+### Analytics (`/analytics`)
+
+Period filter pills: 3 Months (default), 6 Months, Year to Date, All Time, Custom (date range picker). All computation is client-side from `rawSummary` data.
+
+**Period Summary cards** (4): This Week, This Month, Last Month, Daily Avg — each with percentage comparison to previous period (green = less spending, red = more).
+
+**Charts** (Plotly):
+1. **Category Trends** (full width): Line chart showing top 5 spending categories over the last 6 months
+2. **Day of Week Spending**: Bar chart showing average spending per weekday (Mon–Sun), highest day highlighted
+3. **Top 10 Merchants**: Horizontal bar chart grouped by transaction description
+4. **Spending Velocity** (full width): Cumulative spend this month vs last month — shows if spending is faster or slower
+
+Period Summary and Spending Velocity always use absolute current/last month data regardless of filter selection. Category Trends, Day of Week, and Merchant Analysis respond to the selected filter range.
+
 ---
 
 ## Security Measures
@@ -353,7 +376,11 @@ Chart colors are derived from CSS variables via `getThemeColors()` — works aut
 - **Rate limiting** on login and setup (5/min each)
 - **Open redirect prevention** — `next` param only allows relative paths starting with `/`, rejects `//`
 - **XSS prevention** — user content escaped via `esc()` helper in JS templates, Jinja2 auto-escaping in server templates
-- **Formula injection prevention** — `sanitize_cell()` prefixes `=`, `+`, `-`, `@` with `'` before writing to xlsx
+- **Formula injection prevention** — `sanitize_cell()` prefixes `=`, `+`, `-`, `@`, `|`, `\t` with `'` before writing to xlsx
+- **Thread-safe file access** — `_xlsx_lock` and `_accounts_lock` in spreadsheet.py protect concurrent read-modify-write operations
+- **Generic error messages** — API endpoints return "Operation failed" instead of internal error details
+- **Investment price caching** — Yahoo Finance responses cached for 5 minutes to prevent abuse
+- **Transaction read caching** — `get_all_transactions()` caches parsed results, invalidated on xlsx write (file mtime check)
 - **auth.json permissions** — `os.chmod(AUTH_FILE, 0o600)` after creation
 - **Session cookies** — HttpOnly, SameSite=Lax, Secure configurable via env var
 - **Setup lockout** — `/setup` permanently redirects to `/login` after initial configuration
@@ -406,7 +433,7 @@ In-memory stack (`UNDO_STACK` in app.py, max 20 entries). Before deleting a tran
 
 - `manifest.json` served from Flask route (not a static file) — allows dynamic configuration
 - Service worker (`/sw.js`) uses network-first strategy: tries live fetch, falls back to cache for static assets
-- Service worker registered in `static/theme.js` (loaded on every page)
+- Service worker registered in `static/interactions.js` (loaded on every authenticated page)
 - PWA icons at `static/icon-192.png` and `static/icon-512.png`
 
 ### Advanced filters (Manage page)
@@ -425,6 +452,7 @@ bcrypt>=4.0.0
 python-dotenv>=1.0.0
 flask-limiter>=3.0.0
 flask-wtf>=1.2.0
+gunicorn>=21.2.0
 ```
 
 ---
@@ -438,7 +466,7 @@ flask-wtf>=1.2.0
 3. Include `<link rel="stylesheet" href="/static/themes.css">` in head
 4. Include `<script src="/static/theme.js"></script>` and `<script>initThemePicker();</script>` before `</body>`
 5. Add CSRF meta tag if the page makes fetch() calls
-6. Add nav link in ALL templates' `.nav-links` div (dashboard.html, manage.html, accounts.html)
+6. Add nav link in ALL templates' `.nav-links` div (dashboard.html, analytics.html, manage.html, accounts.html)
 
 ### Adding a new field to transactions
 
@@ -473,7 +501,7 @@ All theme colors are in `static/themes.css`. Dashboard chart colors are derived 
 ## Known Limitations
 
 - **Single user only** — no multi-user support, no user management
-- **No concurrent access safety** — the xlsx file has no locking. Simultaneous writes can corrupt data
+- **Thread-safe but not multi-process safe** — thread locks protect concurrent writes within a single process (gunicorn -w 1). Running multiple workers would require file-level locking
 - **No pagination** — all transactions are loaded at once. Will slow down with thousands of entries
 - **Dashboard recomputes on every load** — `compute_account_balances()` reads all transactions every time
 - **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 5 files. Theme CSS/JS is shared via static files.

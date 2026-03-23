@@ -10,6 +10,7 @@
   <title>Manage — Expense Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="/static/interactions.js"></script>
   <link rel="stylesheet" href="/static/themes.css">
   <script>document.documentElement.setAttribute('data-theme',(localStorage.getItem('em-palette')||'github')+'-'+(localStorage.getItem('em-mode')||'dark'));</script>
   <style>
@@ -631,6 +632,7 @@
   <a href="/" class="nav-logo">Expense Manager</a>
   <div class="nav-links">
     <a href="/">Dashboard</a>
+    <a href="/analytics">Analytics</a>
     <a href="/manage" class="active">Manage</a>
     <a href="/accounts">Accounts</a>
     <a href="/logout" class="nav-logout">Log Out</a>
@@ -856,7 +858,7 @@
             </div>
           </div>
           {% endfor %}
-          <button class="add-sub-btn" onclick="event.stopPropagation(); openSubModal({{ txn.id }}, '{{ txn.description|e }}', {{ txn.amount }}, '{{ txn.account|e }}', '{{ txn.category|e }}', '{{ txn.date }}')">+ add sub-expense</button>
+          <button class="add-sub-btn" onclick="event.stopPropagation(); openSubModal({{ txn.id }}, {{ txn.description|tojson }}, {{ txn.amount }}, {{ txn.account|tojson }}, {{ txn.category|tojson }}, {{ txn.date|tojson }})">+ add sub-expense</button>
         </div>
       </div>
     {% endfor %}
@@ -1223,7 +1225,10 @@
             card.className = 'txn-card';
             card.dataset.id = data.id;
             card.dataset.desc = payload.description.toLowerCase();
-            card.dataset.cat = payload.category.toLowerCase();
+            card.dataset.cat = payload.category;
+            card.dataset.account = payload.account;
+            card.dataset.type = payload.type || 'Expense';
+            card.dataset.date = payload.date;
             card.innerHTML = `<div class="txn-main" onclick="toggleCard(this.parentElement)">
                 <span class="txn-dot ${esc(dotClass)}"></span>
                 <div class="txn-info">
@@ -1245,7 +1250,7 @@
                 <span class="expand-icon">▾</span>
               </div>
               <div class="sub-items">
-                <button class="add-sub-btn" onclick="event.stopPropagation(); openSubModal(${parseInt(data.id)}, '${esc(payload.description).replace(/'/g, "\\'")}', ${parseFloat(payload.amount)}, '${esc(payload.account).replace(/'/g, "\\'")}', '${esc(payload.category).replace(/'/g, "\\'")}', '${esc(payload.date)}')">+ add sub-expense</button>
+                <button class="add-sub-btn" onclick="event.stopPropagation(); openSubModal(${parseInt(data.id)}, ${JSON.stringify(payload.description)}, ${parseFloat(payload.amount)}, ${JSON.stringify(payload.account)}, ${JSON.stringify(payload.category)}, ${JSON.stringify(payload.date)})">+ add sub-expense</button>
               </div>`;
 
             let inserted = false;
@@ -1367,6 +1372,27 @@
   document.getElementById('filter-category')?.addEventListener('change', applyFilters);
   document.getElementById('filter-from')?.addEventListener('change', applyFilters);
   document.getElementById('filter-to')?.addEventListener('change', applyFilters);
+
+  // Auto-filter from URL params (e.g., ?date=2026-03-05 from dashboard chart click)
+  (function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const dateParam = urlParams.get('date');
+    if (dateParam) {
+      const fromEl = document.getElementById('filter-from');
+      const toEl = document.getElementById('filter-to');
+      if (fromEl && toEl) {
+        fromEl.value = dateParam;
+        toEl.value = dateParam;
+        // Expand the filter section if collapsed
+        const filterSection = document.querySelector('.filter-section');
+        if (filterSection) filterSection.style.display = 'flex';
+        applyFilters();
+        // Scroll to transaction list
+        const txnList = document.getElementById('txn-list');
+        if (txnList) setTimeout(() => txnList.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+      }
+    }
+  })();
 
   function clearFilters() {
     document.getElementById('search').value = '';
@@ -1572,7 +1598,7 @@
     subSelect.innerHTML = '<option value="">None</option>';
     if (categories[parentCategory]) {
       categories[parentCategory].forEach(sc => {
-        subSelect.innerHTML += '<option value="' + sc + '">' + sc + '</option>';
+        { const opt = document.createElement('option'); opt.value = sc; opt.textContent = sc; subSelect.appendChild(opt); }
       });
     }
 
@@ -1593,7 +1619,7 @@
     subSelect.innerHTML = '<option value="">None</option>';
     if (categories[this.value]) {
       categories[this.value].forEach(sc => {
-        subSelect.innerHTML += '<option value="' + sc + '">' + sc + '</option>';
+        { const opt = document.createElement('option'); opt.value = sc; opt.textContent = sc; subSelect.appendChild(opt); }
       });
     }
   });
@@ -1608,7 +1634,7 @@
     const subCategory = document.getElementById('sub-subcategory').value;
 
     if (!desc || !date || !category) {
-      showToast('Please fill in description, date, and category', true);
+      showToast('Please fill in description, date, and category', 'error');
       return;
     }
 
@@ -1638,10 +1664,10 @@
         closeSubModal();
         setTimeout(() => location.reload(), 500);
       } else {
-        showToast(data.error || 'Failed', true);
+        showToast(data.error || 'Failed', 'error');
       }
     } catch (err) {
-      showToast('Network error', true);
+      showToast('Network error', 'error');
     }
     btn.disabled = false;
     btn.textContent = 'Add Sub-expense';
@@ -1736,15 +1762,13 @@
   // TOAST HELPER
   // ═══════════════════════════════════════════════════════════════════════════
 
-  function showToast(msg, type) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = `toast ${type} show`;
-    setTimeout(() => t.classList.remove('show'), 2500);
-  }
+  // showToast is provided by interactions.js
 
 </script>
 <script src="/static/theme.js"></script>
-<script>initThemePicker();</script>
+<script>
+  initThemePicker();
+  initPullToRefresh();
+</script>
 </body>
 </html>

@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
+  <script src="/static/interactions.js"></script>
   <link rel="stylesheet" href="/static/themes.css">
   <script>document.documentElement.setAttribute('data-theme',(localStorage.getItem('em-palette')||'github')+'-'+(localStorage.getItem('em-mode')||'dark'));</script>
   <style>
@@ -91,6 +92,7 @@
     }
     .chart-title { font-family: var(--font-display); font-weight: 600; font-size: 0.95rem; margin-bottom: 16px; color: var(--text); }
     .chart-wrap { width: 100%; }
+    #chart-daily .plotly .cursor-pointer, #chart-daily .nsewdrag { cursor: pointer !important; }
 
     /* Account balance cards */
     .acct-balances {
@@ -158,7 +160,7 @@
       padding: 6px 10px; outline: none; -webkit-appearance: none; appearance: none;
     }
     .date-range-row input[type="date"]:focus { border-color: var(--accent); }
-    [data-theme="dark"] .date-range-row input[type="date"]::-webkit-calendar-picker-indicator {
+    [data-theme$="-dark"] .date-range-row input[type="date"]::-webkit-calendar-picker-indicator {
       filter: invert(1) opacity(0.4);
     }
     .date-range-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
@@ -180,6 +182,7 @@
   <a href="/" class="nav-logo">Expense Manager</a>
   <div class="nav-links">
     <a href="/" class="active">Dashboard</a>
+    <a href="/analytics">Analytics</a>
     <a href="/manage">Manage</a>
     <a href="/accounts">Accounts</a>
     <a href="/logout" class="nav-logout">Log Out</a>
@@ -271,9 +274,9 @@
 </div>
 
 <script>
-  const rawSummary = {{ summary|safe }};
-  const accountsData = {{ accounts|safe }};
-  const balancesData = {{ balances|safe }};
+  const rawSummary = {{ summary|tojson }};
+  const accountsData = {{ accounts|tojson }};
+  const balancesData = {{ balances|tojson }};
 
   const accountTypeMap = {};
   accountsData.forEach(a => accountTypeMap[a.name] = a.type);
@@ -392,6 +395,8 @@
   }
 
   // ── Render account balance cards ──
+  const escHTML = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+
   function renderAccountBalances() {
     const container = document.getElementById('acct-balances');
     const nonInvestment = balancesData.filter(b => b.type !== 'investment');
@@ -402,9 +407,9 @@
       const amount = isSavings ? fmt(b.current_balance || 0) : fmt(b.remaining || 0);
       const detail = isSavings ? 'Current balance' : `Spent ${fmt(b.accumulated || 0)} of ${fmt(b.limit || 0)}`;
       return `<div class="acct-bal-card">
-        <span class="acct-bal-dot ${b.type}"></span>
+        <span class="acct-bal-dot ${escHTML(b.type)}"></span>
         <div class="acct-bal-info">
-          <div class="acct-bal-name">${b.name}</div>
+          <div class="acct-bal-name">${escHTML(b.name)}</div>
           <div class="acct-bal-detail">${detail}</div>
         </div>
         <div class="acct-bal-amount" style="color:var(--${isSavings ? 'savings' : 'cc'})">${amount}</div>
@@ -421,7 +426,7 @@
         return `<div class="acct-bal-card" id="inv-card-${b.id}">
           <span class="acct-bal-dot investment"></span>
           <div class="acct-bal-info">
-            <div class="acct-bal-name">${b.name}</div>
+            <div class="acct-bal-name">${escHTML(b.name)}</div>
             <div class="acct-bal-detail">${detail}</div>
           </div>
           <div class="acct-bal-amount inv-loading" style="color:var(--muted)">Loading...</div>
@@ -482,6 +487,9 @@
             amtEl.style.color = 'var(--muted)';
           });
         });
+    } else {
+      // No investments — still render net worth from savings/credit
+      renderNetWorth([]);
     }
   }
 
@@ -520,29 +528,46 @@
         <span class="recent-dot ${type}"></span>
         <div class="recent-info">
           <div class="recent-desc">${esc(t.description)}</div>
-          <div class="recent-meta">${esc(t.category)} · ${esc(t.date.slice(5))}</div>
+          <div class="recent-meta">${esc(t.category)} · ${timeAgo(t.date)}</div>
         </div>
         <div class="recent-amount ${amtClass}">${prefix}${fmt(t.amount)}</div>
       </div>`;
     }).join('');
   }
 
-  function renderAll(filter) {
+  function renderAll(filter, animate = true) {
     const { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, topCat, recentTxns } = filterData(filter);
     const c = getThemeColors();
 
-    // Stats
-    document.getElementById('stat-total').textContent = fmt(totalExpense);
-    document.getElementById('stat-income').textContent = fmt(totalIncome);
+    // Stats with animated counters
+    if (animate) {
+      animateStat('stat-total', totalExpense);
+      animateStat('stat-income', totalIncome);
+      animateCounter(document.getElementById('stat-count'), txnCount, { duration: 300 });
+      animateStat('stat-avg', avgDaily);
+    } else {
+      document.getElementById('stat-total').textContent = fmt(totalExpense);
+      document.getElementById('stat-income').textContent = fmt(totalIncome);
+      document.getElementById('stat-count').textContent = txnCount;
+      document.getElementById('stat-avg').textContent = fmt(avgDaily);
+    }
 
     const net = totalIncome - totalExpense;
     const netEl = document.getElementById('stat-net');
-    netEl.textContent = (net >= 0 ? '+' : '') + fmt(net);
+    if (animate) {
+      animateCounter(netEl, net, { formatter: (v) => (v >= 0 ? '+' : '') + fmtINR(v), duration: 450 });
+    } else {
+      netEl.textContent = (net >= 0 ? '+' : '') + fmt(net);
+    }
     netEl.style.color = net >= 0 ? c.SUCCESS : 'var(--danger)';
 
-    document.getElementById('stat-count').textContent = txnCount;
-    document.getElementById('stat-avg').textContent = fmt(avgDaily);
     document.getElementById('stat-topcat').textContent = topCat ? topCat[0] : '—';
+
+    // Trigger stagger animation on stat cards
+    if (animate) {
+      triggerFadeIn('#stats-row');
+      triggerFadeIn('#acct-balances');
+    }
 
     // Account balances
     renderAccountBalances();
@@ -556,11 +581,19 @@
     Plotly.react('chart-daily', [{
       x: dailyDates, y: dailyVals, type: 'scatter', mode: 'lines+markers',
       line: { color: c.ACCENT, width: 2 },
-      marker: { color: c.ACCENT, size: 5 },
+      marker: { color: c.ACCENT, size: 6 },
       fill: 'tozeroy',
       fillcolor: c.FILL_ALPHA,
-      hovertemplate: '<b>%{x}</b><br>₹%{y:,.0f}<extra></extra>',
-    }], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), plotConfig);
+      hovertemplate: '<b>%{x}</b><br>₹%{y:,.0f}<br><i>Click to view transactions</i><extra></extra>',
+    }], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), { ...plotConfig, staticPlot: false });
+
+    // Click handler for daily chart points
+    const dailyChart = document.getElementById('chart-daily');
+    dailyChart.removeAllListeners?.('plotly_click');
+    dailyChart.on('plotly_click', function(data) {
+      const clickedDate = data.points[0].x; // YYYY-MM-DD
+      window.location.href = '/manage?date=' + clickedDate;
+    });
 
     // Category bar
     const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
@@ -653,6 +686,28 @@
 
   // Initial render (theme is already applied)
   renderAll('month');
+
+  // ── Pull to refresh (mobile) ──
+  initPullToRefresh({
+    onRefresh: () => {
+      showToast('Refreshing...', 'info');
+      setTimeout(() => location.reload(), 300);
+    }
+  });
+
+  // ── Auto-refresh every 60s ──
+  initAutoRefresh({
+    interval: 60000,
+    onRefresh: () => {
+      fetch('/api/summary')
+        .then(r => r.json())
+        .then(data => {
+          Object.assign(rawSummary, data);
+          renderAll(getActiveFilter(), false);
+        })
+        .catch(() => {}); // Silently fail
+    }
+  });
 </script>
 </body>
 </html>

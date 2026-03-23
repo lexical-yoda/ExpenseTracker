@@ -3,8 +3,13 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import os
 import json
+import threading
 from datetime import date, datetime
 from collections import defaultdict
+
+# File lock for xlsx read-modify-write operations
+_xlsx_lock = threading.Lock()
+_accounts_lock = threading.Lock()
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -30,7 +35,17 @@ TABLE_START = 1  # Column headers row
 DATA_START = 2   # First transaction row
 
 
+# ── Read cache ─────────────────────────────────────────────────────────────────
+# Cache parsed transactions to avoid re-reading xlsx on every request.
+# Invalidated when file modification time changes (i.e., after any write).
+_txn_cache = {'mtime': 0, 'data': None}
+
+
 # ── Workbook helpers ───────────────────────────────────────────────────────────
+
+def _invalidate_cache():
+    _txn_cache['mtime'] = 0
+    _txn_cache['data'] = None
 
 def load_workbook(data_only=False):
     if not os.path.exists(XLSX_PATH):
@@ -42,6 +57,7 @@ def load_workbook(data_only=False):
 
 def save_workbook(wb):
     wb.save(XLSX_PATH)
+    _invalidate_cache()
 
 
 def month_sheet_name(year=None, month=None):
@@ -105,7 +121,7 @@ def get_next_txn_id(wb):
 
 def sanitize_cell(value):
     """Prevent formula injection in spreadsheet cells."""
-    if isinstance(value, str) and value and value[0] in ('=', '+', '-', '@'):
+    if isinstance(value, str) and value and value[0] in ('=', '+', '-', '@', '|', '\t'):
         return "'" + value
     return value
 
@@ -155,7 +171,12 @@ def parse_row(row, sheet_name):
 
 
 def get_all_transactions():
-    """Return all transactions across all sheets, sorted by date desc."""
+    """Return all transactions across all sheets, sorted by date desc. Cached."""
+    if os.path.exists(XLSX_PATH):
+        mtime = os.path.getmtime(XLSX_PATH)
+        if _txn_cache['data'] is not None and _txn_cache['mtime'] == mtime:
+            return _txn_cache['data']
+
     wb = load_workbook(data_only=True)
     transactions = []
     for name in wb.sheetnames:
@@ -165,6 +186,11 @@ def get_all_transactions():
             if parsed:
                 transactions.append(parsed)
     transactions.sort(key=lambda t: (t['date'], t['id']), reverse=True)
+
+    if os.path.exists(XLSX_PATH):
+        _txn_cache['mtime'] = os.path.getmtime(XLSX_PATH)
+        _txn_cache['data'] = transactions
+
     return transactions
 
 
@@ -183,34 +209,35 @@ def get_transaction_by_id(txn_id):
 
 def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None):
     """Append a transaction to the correct month sheet. Returns txn_id."""
-    d = datetime.strptime(date_str, '%Y-%m-%d').date()
-    wb, ws = ensure_month_sheet(d.year, d.month)
+    with _xlsx_lock:
+        d = datetime.strptime(date_str, '%Y-%m-%d').date()
+        wb, ws = ensure_month_sheet(d.year, d.month)
 
-    txn_id = get_next_txn_id(wb)
-    sheet_name = month_sheet_name(d.year, d.month)
-    ws_fresh = wb[sheet_name]
+        txn_id = get_next_txn_id(wb)
+        sheet_name = month_sheet_name(d.year, d.month)
+        ws_fresh = wb[sheet_name]
 
-    # Find next empty row
-    next_row = DATA_START
-    while ws_fresh.cell(row=next_row, column=COLUMNS['txn_id']).value is not None:
-        next_row += 1
+        # Find next empty row
+        next_row = DATA_START
+        while ws_fresh.cell(row=next_row, column=COLUMNS['txn_id']).value is not None:
+            next_row += 1
 
-    # Write row
-    ws_fresh.cell(row=next_row, column=COLUMNS['date']).value = d
-    ws_fresh.cell(row=next_row, column=COLUMNS['txn_id']).value = txn_id
-    ws_fresh.cell(row=next_row, column=COLUMNS['description']).value = sanitize_cell(description)
-    ws_fresh.cell(row=next_row, column=COLUMNS['category']).value = sanitize_cell(category)
-    ws_fresh.cell(row=next_row, column=COLUMNS['sub_category']).value = sanitize_cell(sub_category or '')
-    ws_fresh.cell(row=next_row, column=COLUMNS['account']).value = sanitize_cell(account)
-    ws_fresh.cell(row=next_row, column=COLUMNS['amount']).value = amount
-    ws_fresh.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
-    ws_fresh.cell(row=next_row, column=COLUMNS['txn_type']).value = txn_type
-    ws_fresh.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if track else 'No'
-    if units is not None:
-        ws_fresh.cell(row=next_row, column=COLUMNS['units']).value = units
-    ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
+        # Write row
+        ws_fresh.cell(row=next_row, column=COLUMNS['date']).value = d
+        ws_fresh.cell(row=next_row, column=COLUMNS['txn_id']).value = txn_id
+        ws_fresh.cell(row=next_row, column=COLUMNS['description']).value = sanitize_cell(description)
+        ws_fresh.cell(row=next_row, column=COLUMNS['category']).value = sanitize_cell(category)
+        ws_fresh.cell(row=next_row, column=COLUMNS['sub_category']).value = sanitize_cell(sub_category or '')
+        ws_fresh.cell(row=next_row, column=COLUMNS['account']).value = sanitize_cell(account)
+        ws_fresh.cell(row=next_row, column=COLUMNS['amount']).value = amount
+        ws_fresh.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
+        ws_fresh.cell(row=next_row, column=COLUMNS['txn_type']).value = txn_type
+        ws_fresh.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if track else 'No'
+        if units is not None:
+            ws_fresh.cell(row=next_row, column=COLUMNS['units']).value = units
+        ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
 
-    save_workbook(wb)
+        save_workbook(wb)
 
     # Auto-update investment account units & balance
     if units is not None and not parent_id:
@@ -221,22 +248,23 @@ def add_transaction(date_str, description, category, sub_category, account, amou
 
 def _update_investment_account(account_name, amount, units, txn_type):
     """Auto-update investment account units and invested amount on transaction."""
-    if not os.path.exists(ACCOUNTS_FILE):
-        return
-    with open(ACCOUNTS_FILE, 'r') as f:
-        accounts = json.load(f)
+    with _accounts_lock:
+        if not os.path.exists(ACCOUNTS_FILE):
+            return
+        with open(ACCOUNTS_FILE, 'r') as f:
+            accounts = json.load(f)
 
-    for acct in accounts:
-        if acct['name'] == account_name and acct.get('type') == 'investment':
-            if txn_type == 'Income':
-                acct['units'] = acct.get('units', 0) + units
-                acct['balance'] = acct.get('balance', 0) + amount
-            elif txn_type == 'Expense':
-                acct['units'] = max(0, acct.get('units', 0) - units)
-                acct['balance'] = max(0, acct.get('balance', 0) - amount)
-            with open(ACCOUNTS_FILE, 'w') as f:
-                json.dump(accounts, f, indent=2)
-            break
+        for acct in accounts:
+            if acct['name'] == account_name and acct.get('type') == 'investment':
+                if txn_type == 'Income':
+                    acct['units'] = acct.get('units', 0) + units
+                    acct['balance'] = acct.get('balance', 0) + amount
+                elif txn_type == 'Expense':
+                    acct['units'] = max(0, acct.get('units', 0) - units)
+                    acct['balance'] = max(0, acct.get('balance', 0) - amount)
+                with open(ACCOUNTS_FILE, 'w') as f:
+                    json.dump(accounts, f, indent=2)
+                break
 
 
 # ── Find / Edit / Delete ──────────────────────────────────────────────────────
@@ -253,6 +281,10 @@ def find_transaction_row(wb, txn_id):
 
 def update_transaction(txn_id, data):
     """Update a transaction in place. Returns updated dict."""
+    with _xlsx_lock:
+        return _update_transaction_inner(txn_id, data)
+
+def _update_transaction_inner(txn_id, data):
     wb = load_workbook()
     result = find_transaction_row(wb, txn_id)
     if not result:
@@ -287,7 +319,11 @@ def update_transaction(txn_id, data):
 
 
 def delete_transaction(txn_id):
-    """Delete a transaction. If parent, also deletes all sub-items."""
+    """Delete a transaction. If parent, also deletes all sub-items in all sheets."""
+    with _xlsx_lock:
+        return _delete_transaction_inner(txn_id)
+
+def _delete_transaction_inner(txn_id):
     wb = load_workbook()
     result = find_transaction_row(wb, txn_id)
     if not result:
@@ -301,15 +337,27 @@ def delete_transaction(txn_id):
     deleted_ids = [txn_id]
 
     if parent_id is None:
-        for r in range(DATA_START, ws.max_row + 1):
-            if r == row_num:
-                continue
-            pid = ws.cell(row=r, column=COLUMNS['parent_id']).value
-            if pid == txn_id:
-                rows_to_delete.append(r)
-                deleted_ids.append(ws.cell(row=r, column=COLUMNS['txn_id']).value)
+        # Search ALL sheets for children (sub-items may be in different months)
+        children_to_delete = {}  # {sheet_name: [row_nums]}
+        for sname in wb.sheetnames:
+            s = wb[sname]
+            for r in range(DATA_START, s.max_row + 1):
+                pid = s.cell(row=r, column=COLUMNS['parent_id']).value
+                if pid == txn_id:
+                    if sname not in children_to_delete:
+                        children_to_delete[sname] = []
+                    children_to_delete[sname].append(r)
+                    deleted_ids.append(s.cell(row=r, column=COLUMNS['txn_id']).value)
+        # Delete children from other sheets
+        for sname, rows in children_to_delete.items():
+            s = wb[sname]
+            for r in sorted(rows, reverse=True):
+                if sname == sheet_name:
+                    rows_to_delete.append(r)
+                else:
+                    s.delete_rows(r, 1)
 
-    for r in sorted(rows_to_delete, reverse=True):
+    for r in sorted(set(rows_to_delete), reverse=True):
         ws.delete_rows(r, 1)
 
     save_workbook(wb)
@@ -320,23 +368,27 @@ def delete_transaction(txn_id):
 
 def rename_account_in_sheets(old_name, new_name):
     """Rename an account across all transaction sheets."""
-    wb = load_workbook()
-    changed = False
-    for name in wb.sheetnames:
-        ws = wb[name]
-        for row_num in range(DATA_START, ws.max_row + 1):
-            cell = ws.cell(row=row_num, column=COLUMNS['account'])
-            if cell.value == old_name:
-                cell.value = new_name
-                changed = True
-    if changed:
-        save_workbook(wb)
+    with _xlsx_lock:
+        wb = load_workbook()
+        changed = False
+        for name in wb.sheetnames:
+            ws = wb[name]
+            for row_num in range(DATA_START, ws.max_row + 1):
+                cell = ws.cell(row=row_num, column=COLUMNS['account'])
+                if cell.value == old_name:
+                    cell.value = new_name
+                    changed = True
+        if changed:
+            save_workbook(wb)
 
 
 def compute_account_balances():
     """Compute current balance for each account from accounts.json + transactions."""
-    with open(ACCOUNTS_FILE, 'r') as f:
-        accounts = json.load(f)
+    with _accounts_lock:
+        if not os.path.exists(ACCOUNTS_FILE):
+            return []
+        with open(ACCOUNTS_FILE, 'r') as f:
+            accounts = json.load(f)
 
     transactions = get_all_transactions()
     parents = [t for t in transactions if not t['parent_id']]
