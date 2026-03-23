@@ -369,9 +369,9 @@
         if (recentTxns.length < 8) recentTxns.push(t);
         if (t.type === 'Transfer') {
           // Transfers don't count as income or expense
-        } else if (t.type === 'Income') {
+        } else if (t.type === 'Income' && t.track !== false) {
           totalIncome += t.amount;
-        } else if (t.track !== false) {
+        } else if (t.type !== 'Income' && t.track !== false) {
           totalExpense += t.amount;
           byCat[t.category] = (byCat[t.category] || 0) + t.amount;
           byAcc[t.account] = (byAcc[t.account] || 0) + t.amount;
