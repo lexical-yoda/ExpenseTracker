@@ -130,7 +130,20 @@ Dashboard shows a net worth card: sum of all savings + investment current values
 
 ## Resetting credentials
 
-The setup page is only available on first run. To change your login after setup:
+### Password reset script
+
+```bash
+# Local — interactive prompt
+python scripts/reset_password.py
+
+# Local — non-interactive
+python scripts/reset_password.py -p mynewpassword
+
+# Docker
+sudo docker exec -it expense-manager python scripts/reset_password.py
+```
+
+### Manual reset
 
 1. Generate a new password hash:
    ```bash
@@ -146,6 +159,8 @@ The setup page is only available on first run. To change your login after setup:
    ```
 
 3. Restart the app.
+
+### Full reset
 
 To start completely fresh, delete the `data/` folder and restart — the setup wizard will appear.
 
@@ -169,7 +184,8 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 │   ├── categories.json # Category definitions
 │   └── expenses.xlsx   # Transaction data
 ├── scripts/
-│   └── take_screenshots.py  # Automated screenshot generator (selenium + geckodriver)
+│   ├── take_screenshots.py  # Automated screenshot generator (selenium + geckodriver)
+│   └── reset_password.py   # CLI password reset tool
 ├── screenshots/             # Auto-generated README screenshots
 ├── static/
 │   ├── themes.css      # 7 color palettes (dark + light each)

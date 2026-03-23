@@ -41,7 +41,8 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 │   ├── categories.json # Category/sub-category definitions
 │   └── expenses.xlsx   # Transaction data (one sheet per month)
 ├── scripts/
-│   └── take_screenshots.py  # Selenium-based screenshot generator for README
+│   ├── take_screenshots.py  # Selenium-based screenshot generator for README
+│   └── reset_password.py   # CLI password reset (interactive or -p flag)
 ├── screenshots/             # Auto-generated screenshots (dark/light, desktop/mobile)
 ├── static/
 │   ├── themes.css      # All theme definitions + theme picker + mobile nav styles
