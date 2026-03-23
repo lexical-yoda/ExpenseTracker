@@ -1,6 +1,40 @@
 # Expense Manager
 
+![Expense Manager Banner](screenshots/banner.png)
+
 A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data store, and multi-account support. Features 7 color themes, Plotly charts, investment tracking with live prices, CSRF protection, and full CRUD for transactions.
+
+---
+
+## Screenshots
+
+### Dark Mode
+
+| Dashboard | Analytics |
+|:---------:|:---------:|
+| ![Dashboard Dark](screenshots/dashboard-desktop-github-dark.png) | ![Analytics Dark](screenshots/analytics-desktop-github-dark.png) |
+
+| Manage | Accounts |
+|:------:|:--------:|
+| ![Manage Dark](screenshots/manage-desktop-github-dark.png) | ![Accounts Dark](screenshots/accounts-desktop-github-dark.png) |
+
+### Light Mode
+
+| Dashboard | Analytics |
+|:---------:|:---------:|
+| ![Dashboard Light](screenshots/dashboard-desktop-github-light.png) | ![Analytics Light](screenshots/analytics-desktop-github-light.png) |
+
+### Mobile
+
+| Dashboard | Manage |
+|:---------:|:------:|
+| ![Dashboard Mobile](screenshots/dashboard-mobile-github-dark.png) | ![Manage Mobile](screenshots/manage-mobile-github-dark.png) |
+
+### Login
+
+| Dark | Light |
+|:----:|:-----:|
+| ![Login Dark](screenshots/login-github-dark.png) | ![Login Light](screenshots/login-github-light.png) |
 
 ---
 
@@ -126,16 +160,23 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env                # Server config (not in git, auto-generated)
+├── .github/
+│   └── workflows/
+│       └── docker.yml  # GitHub Actions — auto-build and push Docker image to ghcr.io
 ├── data/               # All user data (not in git)
 │   ├── auth.json       # Login credentials
 │   ├── accounts.json   # Account definitions (savings, credit, investment)
 │   ├── categories.json # Category definitions
 │   └── expenses.xlsx   # Transaction data
+├── scripts/
+│   └── take_screenshots.py  # Automated screenshot generator (selenium + geckodriver)
+├── screenshots/             # Auto-generated README screenshots
 ├── static/
 │   ├── themes.css      # 7 color palettes (dark + light each)
 │   ├── theme.js        # Theme picker logic + localStorage
 │   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, PWA SW
 │   ├── sw.js           # Service worker (network-first for data, cache-first for static)
+│   ├── favicon.svg     # App favicon
 │   ├── icon-192.png    # PWA icon
 │   └── icon-512.png    # PWA icon
 └── templates/

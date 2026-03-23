@@ -29,17 +29,26 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 ├── app.py              # Flask routes, auth, API endpoints, CSRF
 ├── spreadsheet.py      # openpyxl read/write, balance computation, formula sanitization
 ├── requirements.txt    # Python dependencies
+├── Dockerfile          # Multi-stage build, gunicorn server
+├── docker-compose.yml  # Single-service compose for deployment
 ├── .env                # Server config only (host, port, secret key — auto-generated)
+├── .github/
+│   └── workflows/
+│       └── docker.yml  # GitHub Actions — auto-build and push image to ghcr.io on push to main
 ├── data/               # All user data (back up this folder to migrate)
 │   ├── auth.json       # Login credentials (username + bcrypt hash, chmod 600)
 │   ├── accounts.json   # Account definitions
 │   ├── categories.json # Category/sub-category definitions
 │   └── expenses.xlsx   # Transaction data (one sheet per month)
+├── scripts/
+│   └── take_screenshots.py  # Selenium-based screenshot generator for README
+├── screenshots/             # Auto-generated screenshots (dark/light, desktop/mobile)
 ├── static/
 │   ├── themes.css      # All theme definitions + theme picker + mobile nav styles
 │   ├── theme.js        # Theme picker logic, palette/mode switching, localStorage
 │   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, relative timestamps, PWA SW registration
 │   ├── sw.js           # Service worker (network-first for data, cache-first for static)
+│   ├── favicon.svg     # App favicon (SVG)
 │   ├── icon-192.png    # PWA icon (192x192)
 │   └── icon-512.png    # PWA icon (512x512)
 └── templates/
