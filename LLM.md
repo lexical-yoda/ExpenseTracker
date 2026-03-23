@@ -65,22 +65,31 @@ Read on every request via `load_auth()` — no in-memory caching. Changes take e
 
 ### accounts.json
 
-Array of account objects. Each account is either `savings` or `credit` type.
+Array of account objects. Three types: `savings`, `credit`, and `investment`.
 
 ```json
 [
   {"id": 1, "name": "HDFC Savings", "type": "savings", "balance": 50000},
-  {"id": 2, "name": "ICICI Credit Card", "type": "credit", "limit": 200000}
+  {"id": 2, "name": "ICICI Credit Card", "type": "credit", "limit": 200000},
+  {"id": 3, "name": "NIFTYBEES", "type": "investment", "subtype": "market", "balance": 62823, "ticker": "NIFTYBEES.NS", "units": 220},
+  {"id": 4, "name": "HDFC FD", "type": "investment", "subtype": "fd", "balance": 100000, "interest_rate": 7.5, "start_date": "2025-09-15", "maturity_date": "2026-09-15", "compounding": "quarterly"}
 ]
 ```
 
 - `id`: Auto-incrementing integer, unique per account
 - `name`: Display name, must be unique. This exact string is stored in the spreadsheet's Account column
-- `type`: `"savings"` or `"credit"`
-- `balance` (savings only): Opening balance — the starting amount before any transactions
+- `type`: `"savings"`, `"credit"`, or `"investment"`
+- `balance` (savings): Opening balance — the starting amount before any transactions
+- `balance` (investment): Total invested amount (cost basis / principal)
 - `limit` (credit only): Credit limit
+- `subtype` (investment only): `"market"` (ETF/stock with live pricing) or `"fd"` (fixed deposit)
+- `ticker` (market only): Yahoo Finance symbol (e.g., `NIFTYBEES.NS`)
+- `units` (market only): Number of units/shares held. Auto-updated when transactions with units are added.
+- `interest_rate` (FD only): Annual interest rate percentage
+- `start_date` / `maturity_date` (FD only): `YYYY-MM-DD` strings
+- `compounding` (FD only): `"monthly"`, `"quarterly"`, `"half-yearly"`, or `"yearly"`
 
-Balances are **not** stored per-transaction. They are computed on the fly by `compute_account_balances()` in `spreadsheet.py` which sums all parent transactions per account against the opening balance/limit.
+Balances are computed on the fly by `compute_account_balances()` in `spreadsheet.py` which sums all parent transactions per account against the opening balance/limit. Investment accounts return their cost basis; live values are fetched separately via `/api/investments/prices`.
 
 ### categories.json
 
@@ -118,6 +127,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 | H | 8 | Parent ID | NULL for parent transactions. Set to another Txn ID for sub-items |
 | I | 9 | Type | `"Expense"`, `"Income"`, or `"Transfer"`. NULL treated as Expense |
 | J | 10 | Track | `"Yes"` or `"No"`. Controls dashboard visibility. NULL treated as Yes |
+| K | 11 | Units | Float. Number of units bought/sold for investment account transactions. NULL for non-investment |
 
 ### Transaction hierarchy
 
@@ -193,9 +203,19 @@ Legacy routes `/add`, `/add/sub/<id>`, and `/expenses` redirect to `/manage` for
    - **Credit**: `accumulated = (expenses + transfers) - income`, `remaining = limit - accumulated`
 4. Returns enriched account dicts
 
-**Transfer handling**: Transfers reduce account balances (money moved out) just like expenses, but are excluded from spending summary charts. This avoids double-counting in analytics while keeping balances accurate.
+**Transfer handling**: Transfers reduce account balances (money moved out) just like expenses, but are excluded from spending summary charts. This avoids double-counting in analytics while keeping balances accurate. CC bill payments should be recorded as: Transfer from savings (money out) + Income on CC account (reduces outstanding).
 
 **Track toggle**: Each transaction has a `track` field (Yes/No). Untracked transactions still affect account balances but are excluded from dashboard charts, stat cards, and spending summaries. Useful for investments, SIP payments, or other planned outflows the user doesn't want in their spending analytics. Toggle is available per-transaction in the Manage page via a dot button (◉). Defaults to tracked (Yes) for new transactions.
+
+**Investment transactions**: When a transaction targets an investment account and includes units:
+- `Income` on investment account: auto-adds units and invested amount to the account
+- `Expense` on investment account: auto-subtracts units and invested amount
+- The units field appears in the add/edit form only when an investment account is selected
+- `_update_investment_account()` in spreadsheet.py handles the auto-update
+
+**Investment price fetching**: `fetch_yahoo_price(ticker)` in app.py calls Yahoo Finance's chart API. Returns the `regularMarketPrice` or `None` on failure. Called by `/api/investments/prices` which returns current value, P&L, and percentage for each market investment account.
+
+**FD value calculation**: `calculate_fd_value()` in app.py uses compound interest formula: `A = P(1 + r/n)^(nt)`. Returns current value (based on elapsed time), maturity value, interest earned, days remaining, and matured status.
 
 This is called on every dashboard load and accounts page load. No caching.
 
@@ -232,6 +252,12 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 | PUT | `/api/accounts/<id>` | Update account. Body: `{name, balance/limit}` |
 | DELETE | `/api/accounts/<id>` | Delete account (blocked if transactions exist) |
 | GET | `/api/accounts/balances` | Get computed balances for all accounts |
+
+### Investments
+
+| Method | URL | Purpose |
+|--------|-----|---------|
+| GET | `/api/investments/prices` | Live prices for market investments + FD calculations. Returns current value, P&L, units, and FD maturity info |
 
 ### Other
 
@@ -323,7 +349,7 @@ Chart colors are derived from CSS variables via `getThemeColors()` — works aut
 
 ### Spreadsheet column backward compatibility
 
-The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 10 columns (A–J) with no gaps. Type lives at column I (index 9), Track at column J (index 10). Earlier versions had dead balance columns at I/J/K with Type at L — these were cleaned up and the layout consolidated.
+The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 11 columns (A–K) with no gaps. Type at column I (index 9), Track at column J (index 10), Units at column K (index 11). Earlier versions had dead balance columns — these were cleaned up and the layout consolidated.
 
 ### `parse_row()` bounds checking
 
@@ -416,5 +442,8 @@ All theme colors are in `static/themes.css`. Dashboard chart colors are derived 
 - **No concurrent access safety** — the xlsx file has no locking. Simultaneous writes can corrupt data
 - **No pagination** — all transactions are loaded at once. Will slow down with thousands of entries
 - **Dashboard recomputes on every load** — `compute_account_balances()` reads all transactions every time
-- **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 6 files. Theme CSS/JS is shared via static files.
+- **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 5 files. Theme CSS/JS is shared via static files.
 - **Cross-month date edits blocked** — must delete and re-add to move a transaction between months
+- **Yahoo Finance dependency** — investment prices rely on an unofficial API that could break. Failures are handled gracefully (shows "Price unavailable")
+- **No investment transaction history** — unit updates are immediate; there's no log of past unit changes separate from the transaction list
+- **FD interest is estimated** — calculated using standard compound interest formula; actual bank interest may differ slightly due to day-count conventions

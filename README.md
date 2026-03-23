@@ -1,21 +1,24 @@
 # Expense Manager
 
-A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data store, and multi-account support. Features 7 color themes, Plotly charts, CSRF protection, and full CRUD for transactions.
+A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data store, and multi-account support. Features 7 color themes, Plotly charts, investment tracking with live prices, CSRF protection, and full CRUD for transactions.
 
 ---
 
 ## Features
 
-- Multiple named accounts (savings & credit cards) with live balance tracking
+- **Multiple account types**: savings, credit cards, and investment accounts (ETFs/stocks + fixed deposits)
 - Income, expense, and transfer tracking with per-transaction dashboard tracking toggle
-- Sub-expense support — break down a transaction into individual items
+- **Investment portfolio**: live price fetching from Yahoo Finance, P&L tracking, auto-unit updates
+- **Fixed deposit tracking**: compound interest calculation, maturity countdown
+- **Net worth dashboard**: savings + investments - credit card debt
+- Sub-expense support — break down a transaction into individual items via modal
 - Category & sub-category management from the frontend
-- Dashboard with spending charts, stat cards, and account balances
+- Dashboard with spending charts, stat cards, account balances, and custom date range filtering
 - 7 color themes (GitHub, Indigo, Nord, Emerald, Rose, Amber, Ocean) with dark/light modes
 - Login authentication with bcrypt, rate limiting, and CSRF protection
 - First-time setup wizard — creates login, accounts, and categories
-- Mobile-responsive layout
-- Custom date range filtering on the dashboard
+- Mobile-responsive layout with no theme flash on page load
+- Transactions sorted by date and ID, grouped by day with day-of-week headers
 
 ---
 
@@ -26,9 +29,9 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 | `/` | Redirects to dashboard |
 | `/setup` | First-time setup (create login & accounts) |
 | `/login` | Sign in |
-| `/dashboard` | Charts, stats & spending summary (home page) |
-| `/manage` | Add transactions + transaction list with edit/delete |
-| `/accounts` | Manage accounts |
+| `/dashboard` | Charts, stats, account balances, investments & net worth (home page) |
+| `/manage` | Add transactions + transaction list with edit/delete/track toggle |
+| `/accounts` | Manage accounts (savings, credit, investment/ETF, fixed deposits) |
 
 ---
 
@@ -58,13 +61,31 @@ All user data lives in the `data/` folder:
 | File | Contents |
 |------|----------|
 | `data/auth.json` | Login credentials (username + bcrypt hash) |
-| `data/accounts.json` | Account definitions (names, types, balances/limits) |
+| `data/accounts.json` | Account definitions (savings, credit, investment with tickers/FD details) |
 | `data/categories.json` | Category and sub-category definitions |
 | `data/expenses.xlsx` | All transaction data |
 
 To migrate or restore: copy the entire `data/` folder to the new install. The app handles an empty or missing `data/` folder gracefully — it will show the setup wizard to start fresh.
 
 The `.env` file holds only server config (host, port, secret key) and is auto-generated during setup if missing.
+
+---
+
+## Investment Tracking
+
+### Market/ETF accounts
+- Add an investment account with a **Yahoo Finance ticker** (e.g., `NIFTYBEES.NS`, `GOLDBEES.NS`)
+- Enter units held and total invested amount
+- Dashboard fetches live prices and shows current value, P&L (amount + percentage)
+- When buying new units: add an Income transaction on the investment account with the **units** field — the app auto-updates the account's units and invested amount
+
+### Fixed Deposits
+- Add an investment account with subtype **Fixed Deposit**
+- Enter principal, interest rate, start date, maturity date, and compounding frequency
+- Dashboard calculates current value with compound interest and shows days remaining
+
+### Net Worth
+Dashboard shows a net worth card: sum of all savings + investment current values - credit card outstanding.
 
 ---
 
@@ -94,13 +115,15 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 ## Project structure
 
 ```
-├── app.py              # Flask routes, auth, API endpoints
-├── spreadsheet.py      # openpyxl read/write, balance computation
+├── app.py              # Flask routes, auth, API endpoints, investment price fetching
+├── spreadsheet.py      # openpyxl read/write, balance computation, formula sanitization
 ├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
 ├── .env                # Server config (not in git, auto-generated)
 ├── data/               # All user data (not in git)
 │   ├── auth.json       # Login credentials
-│   ├── accounts.json   # Account definitions
+│   ├── accounts.json   # Account definitions (savings, credit, investment)
 │   ├── categories.json # Category definitions
 │   └── expenses.xlsx   # Transaction data
 ├── static/
@@ -109,9 +132,9 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 └── templates/
     ├── setup.html      # First-time setup wizard
     ├── login.html      # Login page
-    ├── dashboard.html  # Plotly charts & stats (home page)
-    ├── manage.html     # Add transactions + transaction list
-    └── accounts.html   # Account management
+    ├── dashboard.html  # Plotly charts, stats, investments & net worth (home page)
+    ├── manage.html     # Add transactions + transaction list with sub-expense modal
+    └── accounts.html   # Account management (savings, credit, investment, FD)
 ```
 
 ---
@@ -119,11 +142,13 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 ## Notes
 
 - Only parent transactions count toward balance calculations — sub-items don't double-count
-- Transactions can be toggled as "tracked" or "untracked" — untracked ones still affect account balances but are excluded from dashboard charts and spending totals (useful for investments, internal transfers, etc.)
+- Transactions can be toggled as "tracked" or "untracked" — untracked ones still affect account balances but are excluded from dashboard charts and spending totals
 - Transaction IDs are global integers across all months
 - The `.xlsx` is the single source of truth — you can edit it manually in a spreadsheet app
 - `categories.json` and `accounts.json` are updated live from the frontend — no restart needed
-- Themes persist across pages via localStorage
+- Themes persist across pages via localStorage with no flash of unstyled content
+- Investment prices are fetched from Yahoo Finance (free, ~15min delay)
+- CC bill payments should be recorded as a Transfer from savings + Income on the CC account
 
 ---
 

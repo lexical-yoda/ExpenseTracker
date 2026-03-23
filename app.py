@@ -7,12 +7,14 @@ from flask_limiter.util import get_remote_address
 import bcrypt
 import json
 import os
+import urllib.request
+import urllib.error
 from spreadsheet import (
     get_all_transactions, add_transaction, get_transaction_by_id,
     get_monthly_summary, update_transaction, delete_transaction,
     rename_account_in_sheets, compute_account_balances
 )
-from datetime import date
+from datetime import date, datetime
 
 load_dotenv()
 
@@ -26,6 +28,15 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 limiter = Limiter(get_remote_address, app=app, default_limits=[])
 csrf = CSRFProtect(app)
+
+
+@app.template_filter('dayname')
+def dayname_filter(date_str):
+    """Convert 'YYYY-MM-DD' to day name like 'Monday'."""
+    try:
+        return datetime.strptime(date_str, '%Y-%m-%d').strftime('%A')
+    except (ValueError, TypeError):
+        return ''
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -98,8 +109,8 @@ def login():
                 bcrypt.checkpw(password.encode('utf-8'), auth['password_hash'].encode('utf-8'))):
             login_user(User(username), remember=True)
             next_page = request.args.get('next', '')
-            # Only allow relative redirects to prevent open redirect attacks
-            if not next_page or next_page.startswith(('http://', 'https://', '//')):
+            # Only allow relative paths to prevent open redirect attacks
+            if not next_page or not next_page.startswith('/') or next_page.startswith('//'):
                 next_page = url_for('dashboard')
             return redirect(next_page)
         else:
@@ -109,6 +120,7 @@ def login():
 
 
 @app.route('/setup', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
 def setup():
     if is_setup_complete():
         return redirect(url_for('login'))
@@ -232,7 +244,12 @@ def manage():
         if t['parent_id']:
             children.setdefault(t['parent_id'], []).append(t)
     parent_id = request.args.get('parent')
-    parent = get_transaction_by_id(int(parent_id)) if parent_id else None
+    parent = None
+    if parent_id:
+        try:
+            parent = get_transaction_by_id(int(parent_id))
+        except (ValueError, TypeError):
+            pass
     return render_template('manage.html', categories=categories, accounts=accounts, today=today, parent=parent, parents=parents, children=children)
 
 
@@ -281,6 +298,7 @@ def api_add_transaction():
     if txn_type not in ('Expense', 'Income', 'Transfer'):
         return jsonify({'success': False, 'error': 'Type must be Expense, Income, or Transfer'}), 400
     try:
+        units = float(data['units']) if data.get('units') else None
         txn_id = add_transaction(
             date_str=data['date'],
             description=data['description'],
@@ -290,7 +308,8 @@ def api_add_transaction():
             amount=float(data['amount']),
             parent_id=data.get('parent_id') or None,
             txn_type=txn_type,
-            track=data.get('track', True)
+            track=data.get('track', True),
+            units=units
         )
         return jsonify({'success': True, 'id': txn_id})
     except Exception as e:
@@ -396,8 +415,8 @@ def api_add_account():
 
     if not name:
         return jsonify({'success': False, 'error': 'Account name required'}), 400
-    if acct_type not in ('savings', 'credit'):
-        return jsonify({'success': False, 'error': 'Type must be savings or credit'}), 400
+    if acct_type not in ('savings', 'credit', 'investment'):
+        return jsonify({'success': False, 'error': 'Type must be savings, credit, or investment'}), 400
     if any(a['name'] == name for a in accounts):
         return jsonify({'success': False, 'error': 'Account name already exists'}), 400
 
@@ -406,8 +425,20 @@ def api_add_account():
 
     if acct_type == 'savings':
         new_account['balance'] = float(data.get('balance', 0))
-    else:
+    elif acct_type == 'credit':
         new_account['limit'] = float(data.get('limit', 0))
+    elif acct_type == 'investment':
+        subtype = data.get('subtype', 'market').strip()
+        new_account['subtype'] = subtype
+        new_account['balance'] = float(data.get('balance', 0))
+        if subtype == 'fd':
+            new_account['interest_rate'] = float(data.get('interest_rate', 0))
+            new_account['start_date'] = data.get('start_date', '')
+            new_account['maturity_date'] = data.get('maturity_date', '')
+            new_account['compounding'] = data.get('compounding', 'quarterly')
+        else:
+            new_account['ticker'] = data.get('ticker', '').strip()
+            new_account['units'] = float(data.get('units', 0))
 
     accounts.append(new_account)
     save_accounts(accounts)
@@ -436,8 +467,19 @@ def api_update_account(account_id):
     acct['name'] = new_name
     if acct['type'] == 'savings':
         acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
-    else:
+    elif acct['type'] == 'credit':
         acct['limit'] = float(data.get('limit', acct.get('limit', 0)))
+    elif acct['type'] == 'investment':
+        acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
+        subtype = acct.get('subtype', 'market')
+        if subtype == 'fd':
+            acct['interest_rate'] = float(data.get('interest_rate', acct.get('interest_rate', 0)))
+            acct['start_date'] = data.get('start_date', acct.get('start_date', ''))
+            acct['maturity_date'] = data.get('maturity_date', acct.get('maturity_date', ''))
+            acct['compounding'] = data.get('compounding', acct.get('compounding', 'quarterly'))
+        else:
+            acct['ticker'] = data.get('ticker', acct.get('ticker', '')).strip()
+            acct['units'] = float(data.get('units', acct.get('units', 0)))
 
     save_accounts(accounts)
 
@@ -475,6 +517,118 @@ def api_account_balances():
 @login_required
 def api_get_summary():
     return jsonify(get_monthly_summary())
+
+
+# ── Investment price fetching ────────────────────────────────────────────────
+
+def fetch_yahoo_price(ticker):
+    """Fetch current price from Yahoo Finance. Returns float or None."""
+    try:
+        url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1d'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            return data['chart']['result'][0]['meta']['regularMarketPrice']
+    except Exception:
+        return None
+
+
+def calculate_fd_value(principal, annual_rate, start_date, maturity_date, compounding='quarterly'):
+    """Calculate current and maturity value of a fixed deposit."""
+    from math import pow as mpow
+    today = date.today()
+
+    try:
+        start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        maturity = datetime.strptime(maturity_date, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+    # Compounding frequency per year
+    n_map = {'monthly': 12, 'quarterly': 4, 'half-yearly': 2, 'yearly': 1}
+    n = n_map.get(compounding, 4)
+    rate = annual_rate / 100
+
+    # Total tenure in years
+    total_years = (maturity - start).days / 365.25
+    maturity_value = principal * mpow(1 + rate / n, n * total_years)
+
+    # Elapsed time
+    elapsed_days = (min(today, maturity) - start).days
+    elapsed_years = max(0, elapsed_days / 365.25)
+    current_value = principal * mpow(1 + rate / n, n * elapsed_years)
+
+    days_remaining = max(0, (maturity - today).days)
+
+    return {
+        'current_value': round(current_value, 2),
+        'maturity_value': round(maturity_value, 2),
+        'interest_earned': round(current_value - principal, 2),
+        'days_remaining': days_remaining,
+        'matured': today >= maturity,
+    }
+
+
+@app.route('/api/investments/prices', methods=['GET'])
+@login_required
+def api_investment_prices():
+    accounts = load_accounts()
+    results = []
+    for acct in accounts:
+        if acct.get('type') != 'investment':
+            continue
+
+        subtype = acct.get('subtype', 'market')
+
+        if subtype == 'fd':
+            fd_data = calculate_fd_value(
+                acct.get('balance', 0),
+                acct.get('interest_rate', 0),
+                acct.get('start_date', ''),
+                acct.get('maturity_date', ''),
+                acct.get('compounding', 'quarterly')
+            )
+            results.append({
+                'id': acct['id'],
+                'name': acct['name'],
+                'subtype': 'fd',
+                'principal': acct.get('balance', 0),
+                'interest_rate': acct.get('interest_rate', 0),
+                'start_date': acct.get('start_date', ''),
+                'maturity_date': acct.get('maturity_date', ''),
+                'compounding': acct.get('compounding', 'quarterly'),
+                'current_value': fd_data['current_value'] if fd_data else None,
+                'maturity_value': fd_data['maturity_value'] if fd_data else None,
+                'interest_earned': fd_data['interest_earned'] if fd_data else None,
+                'days_remaining': fd_data['days_remaining'] if fd_data else None,
+                'matured': fd_data['matured'] if fd_data else False,
+                'invested': acct.get('balance', 0),
+                'pnl': fd_data['interest_earned'] if fd_data else None,
+                'pnl_pct': round((fd_data['interest_earned'] / acct.get('balance', 1)) * 100, 2) if fd_data and fd_data['interest_earned'] else None,
+            })
+        else:
+            ticker = acct.get('ticker')
+            if not ticker:
+                continue
+            price = fetch_yahoo_price(ticker)
+            units = acct.get('units', 0)
+            invested = acct.get('balance', 0)
+            current_value = round(units * price, 2) if price else None
+            pnl = round(current_value - invested, 2) if current_value else None
+            pnl_pct = round((pnl / invested) * 100, 2) if pnl is not None and invested > 0 else None
+            results.append({
+                'id': acct['id'],
+                'name': acct['name'],
+                'subtype': 'market',
+                'ticker': ticker,
+                'units': units,
+                'invested': invested,
+                'price': price,
+                'current_value': current_value,
+                'pnl': pnl,
+                'pnl_pct': pnl_pct,
+            })
+    return jsonify(results)
 
 
 if __name__ == '__main__':

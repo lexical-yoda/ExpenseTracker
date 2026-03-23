@@ -23,6 +23,7 @@ COLUMNS = {
     'parent_id': 8,     # H
     'txn_type': 9,      # I
     'track': 10,        # J — Yes/No, controls dashboard visibility
+    'units': 11,        # K — units bought/sold for investment accounts
 }
 
 TABLE_START = 1  # Column headers row
@@ -72,8 +73,8 @@ def _init_sheet(ws):
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     headers = ['Date', 'Txn ID', 'Description', 'Category', 'Sub-Category',
-               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track']
-    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8]
+               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track', 'Units']
+    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8, 10]
 
     for col, header in enumerate(headers, start=1):
         if not header:
@@ -134,6 +135,9 @@ def parse_row(row, sheet_name):
     # Default to 'Yes' if column is empty or missing (backward compat)
     tracked = True if track_val is None or str(track_val).strip().lower() in ('yes', 'true', '1', '') else False
 
+    units_val = val('units')
+    units = float(units_val) if units_val is not None and units_val != '' else None
+
     return {
         'id': txn_id,
         'date': date_str,
@@ -145,6 +149,7 @@ def parse_row(row, sheet_name):
         'parent_id': val('parent_id'),
         'type': txn_type or 'Expense',
         'track': tracked,
+        'units': units,
         'sheet': sheet_name,
     }
 
@@ -159,7 +164,7 @@ def get_all_transactions():
             parsed = parse_row(row, name)
             if parsed:
                 transactions.append(parsed)
-    transactions.sort(key=lambda t: t['date'], reverse=True)
+    transactions.sort(key=lambda t: (t['date'], t['id']), reverse=True)
     return transactions
 
 
@@ -176,7 +181,7 @@ def get_transaction_by_id(txn_id):
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
-def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True):
+def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None):
     """Append a transaction to the correct month sheet. Returns txn_id."""
     d = datetime.strptime(date_str, '%Y-%m-%d').date()
     wb, ws = ensure_month_sheet(d.year, d.month)
@@ -201,10 +206,37 @@ def add_transaction(date_str, description, category, sub_category, account, amou
     ws_fresh.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
     ws_fresh.cell(row=next_row, column=COLUMNS['txn_type']).value = txn_type
     ws_fresh.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if track else 'No'
+    if units is not None:
+        ws_fresh.cell(row=next_row, column=COLUMNS['units']).value = units
     ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
 
     save_workbook(wb)
+
+    # Auto-update investment account units & balance
+    if units is not None and not parent_id:
+        _update_investment_account(account, amount, units, txn_type)
+
     return txn_id
+
+
+def _update_investment_account(account_name, amount, units, txn_type):
+    """Auto-update investment account units and invested amount on transaction."""
+    if not os.path.exists(ACCOUNTS_FILE):
+        return
+    with open(ACCOUNTS_FILE, 'r') as f:
+        accounts = json.load(f)
+
+    for acct in accounts:
+        if acct['name'] == account_name and acct.get('type') == 'investment':
+            if txn_type == 'Income':
+                acct['units'] = acct.get('units', 0) + units
+                acct['balance'] = acct.get('balance', 0) + amount
+            elif txn_type == 'Expense':
+                acct['units'] = max(0, acct.get('units', 0) - units)
+                acct['balance'] = max(0, acct.get('balance', 0) - amount)
+            with open(ACCOUNTS_FILE, 'w') as f:
+                json.dump(accounts, f, indent=2)
+            break
 
 
 # ── Find / Edit / Delete ──────────────────────────────────────────────────────
@@ -247,6 +279,8 @@ def update_transaction(txn_id, data):
     ws.cell(row=row_num, column=COLUMNS['txn_type']).value = data.get('type', 'Expense')
     if 'track' in data:
         ws.cell(row=row_num, column=COLUMNS['track']).value = 'Yes' if data['track'] else 'No'
+    if 'units' in data and data['units'] is not None:
+        ws.cell(row=row_num, column=COLUMNS['units']).value = float(data['units'])
 
     save_workbook(wb)
     return get_transaction_by_id(txn_id)
@@ -328,6 +362,11 @@ def compute_account_balances():
             accumulated = spent - earned
             remaining = acct['limit'] - accumulated
             result.append({**acct, 'accumulated': round(accumulated, 2), 'remaining': round(remaining, 2)})
+        elif acct['type'] == 'investment':
+            # Investment accounts: balance = cost basis / principal
+            entry = {**acct, 'invested': acct.get('balance', 0)}
+            entry['subtype'] = acct.get('subtype', 'market')
+            result.append(entry)
     return result
 
 

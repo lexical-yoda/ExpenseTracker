@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/themes.css">
+  <script>document.documentElement.setAttribute('data-theme',(localStorage.getItem('em-palette')||'github')+'-'+(localStorage.getItem('em-mode')||'dark'));</script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -101,6 +102,8 @@
     }
     .acct-badge.savings { background: rgba(88,166,255,0.1); color: var(--savings); }
     .acct-badge.cc { background: rgba(210,153,34,0.1); color: var(--cc); }
+    .acct-badge.investment { background: rgba(88,166,255,0.1); color: var(--accent); }
+    .acct-dot.investment { background: var(--accent); }
 
     .acct-balance {
       font-size: 0.75rem;
@@ -304,22 +307,26 @@
         {% endif %}
       {% endfor %}
       <div class="acct-card" data-id="{{ acct.id }}">
-        <span class="acct-dot {{ 'savings' if acct.type == 'savings' else 'cc' }}"></span>
+        <span class="acct-dot {{ 'savings' if acct.type == 'savings' else 'investment' if acct.type == 'investment' else 'cc' }}"></span>
         <div class="acct-info">
           <div class="acct-name">
             {{ acct.name }}
-            <span class="acct-badge {{ 'savings' if acct.type == 'savings' else 'cc' }}">{{ 'savings' if acct.type == 'savings' else 'credit' }}</span>
+            <span class="acct-badge {{ 'savings' if acct.type == 'savings' else 'investment' if acct.type == 'investment' else 'cc' }}">{{ acct.type }}</span>
           </div>
           <div class="acct-balance">
             {% if acct.type == 'savings' %}
               Balance: ₹{{ "%.2f"|format(bal.current_balance if bal else acct.balance) }}
+            {% elif acct.type == 'investment' and acct.subtype|default('market') == 'fd' %}
+              ₹{{ "%.2f"|format(acct.balance|default(0)) }} @ {{ acct.interest_rate|default(0) }}% p.a. · {{ acct.compounding|default('quarterly') }} · Matures {{ acct.maturity_date|default('') }}
+            {% elif acct.type == 'investment' %}
+              {{ acct.units|default(0) }} units · Invested: ₹{{ "%.2f"|format(acct.balance|default(0)) }}{% if acct.ticker %} · {{ acct.ticker }}{% endif %}
             {% else %}
               Limit: ₹{{ "%.2f"|format(acct.limit if acct.limit else 0) }} | Remaining: ₹{{ "%.2f"|format(bal.remaining if bal else 0) }}
             {% endif %}
           </div>
         </div>
         <div class="acct-actions">
-          <button class="action-btn" onclick="openEditModal({{ acct.id }}, '{{ acct.name }}', '{{ acct.type }}', {{ acct.balance if acct.type == 'savings' else acct.limit if acct.limit else 0 }})" title="Edit">&#9998;</button>
+          <button class="action-btn" onclick="openEditModal(this.dataset)" data-acct='{{ acct|tojson|e }}' title="Edit">&#9998;</button>
           <button class="action-btn del" onclick="confirmDelete({{ acct.id }}, '{{ acct.name }}')" title="Delete">&#10005;</button>
         </div>
       </div>
@@ -342,7 +349,7 @@
 
     <div class="form-group" id="acct-type-group">
       <label>Type</label>
-      <div class="account-toggle">
+      <div class="account-toggle" style="grid-template-columns: 1fr 1fr 1fr;">
         <div class="toggle-btn savings">
           <input type="radio" name="acct-type" id="acct-type-savings" value="savings" checked>
           <label for="acct-type-savings"><span class="dot"></span> Savings</label>
@@ -351,17 +358,72 @@
           <input type="radio" name="acct-type" id="acct-type-credit" value="credit">
           <label for="acct-type-credit"><span class="dot"></span> Credit</label>
         </div>
+        <div class="toggle-btn">
+          <input type="radio" name="acct-type" id="acct-type-investment" value="investment">
+          <label for="acct-type-investment"><span class="dot"></span> Investment</label>
+        </div>
       </div>
     </div>
 
     <div class="form-group" id="balance-group">
-      <label for="acct-balance">Balance</label>
+      <label for="acct-balance" id="balance-label">Opening Balance</label>
       <input type="number" id="acct-balance" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
     </div>
 
     <div class="form-group" id="limit-group" style="display:none">
-      <label for="acct-limit">Limit</label>
+      <label for="acct-limit">Credit Limit</label>
       <input type="number" id="acct-limit" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+    </div>
+
+    <div id="inv-subtype-group" style="display:none">
+      <div class="form-group">
+        <label>Investment Type</label>
+        <div class="account-toggle">
+          <div class="toggle-btn">
+            <input type="radio" name="inv-subtype" id="inv-subtype-market" value="market" checked>
+            <label for="inv-subtype-market"><span class="dot"></span> Market/ETF</label>
+          </div>
+          <div class="toggle-btn">
+            <input type="radio" name="inv-subtype" id="inv-subtype-fd" value="fd">
+            <label for="inv-subtype-fd"><span class="dot"></span> Fixed Deposit</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-group" id="ticker-group" style="display:none">
+      <label for="acct-ticker">Yahoo Finance Ticker</label>
+      <input type="text" id="acct-ticker" placeholder="e.g. NIFTYBEES.NS" autocomplete="off">
+    </div>
+
+    <div class="form-group" id="units-group" style="display:none">
+      <label for="acct-units">Units Held</label>
+      <input type="number" id="acct-units" step="0.001" min="0" placeholder="0" inputmode="decimal">
+    </div>
+
+    <div class="form-group" id="interest-rate-group" style="display:none">
+      <label for="acct-interest-rate">Interest Rate (% p.a.)</label>
+      <input type="number" id="acct-interest-rate" step="0.01" min="0" placeholder="7.5" inputmode="decimal">
+    </div>
+
+    <div class="form-group" id="start-date-group" style="display:none">
+      <label for="acct-start-date">Start Date</label>
+      <input type="date" id="acct-start-date">
+    </div>
+
+    <div class="form-group" id="maturity-date-group" style="display:none">
+      <label for="acct-maturity-date">Maturity Date</label>
+      <input type="date" id="acct-maturity-date">
+    </div>
+
+    <div class="form-group" id="compounding-group" style="display:none">
+      <label for="acct-compounding">Compounding</label>
+      <select id="acct-compounding">
+        <option value="quarterly">Quarterly</option>
+        <option value="monthly">Monthly</option>
+        <option value="half-yearly">Half-Yearly</option>
+        <option value="yearly">Yearly</option>
+      </select>
     </div>
 
     <button class="submit-btn" id="acct-save-btn">Save Account</button>
@@ -389,17 +451,34 @@
   let deleteTargetId = null;
   let editMode = false;
 
-  // Toggle balance/limit fields based on type
+  // Toggle fields based on type and subtype
+  function getSubtype() {
+    const checked = document.querySelector('input[name="inv-subtype"]:checked');
+    return checked ? checked.value : 'market';
+  }
+
+  function updateTypeFields(type, subtype) {
+    const isInv = type === 'investment';
+    const isFd = isInv && subtype === 'fd';
+    const isMarket = isInv && subtype !== 'fd';
+
+    document.getElementById('balance-group').style.display = (type === 'savings' || isInv) ? 'block' : 'none';
+    document.getElementById('limit-group').style.display = type === 'credit' ? 'block' : 'none';
+    document.getElementById('inv-subtype-group').style.display = isInv ? 'block' : 'none';
+    document.getElementById('ticker-group').style.display = isMarket ? 'block' : 'none';
+    document.getElementById('units-group').style.display = isMarket ? 'block' : 'none';
+    document.getElementById('interest-rate-group').style.display = isFd ? 'block' : 'none';
+    document.getElementById('start-date-group').style.display = isFd ? 'block' : 'none';
+    document.getElementById('maturity-date-group').style.display = isFd ? 'block' : 'none';
+    document.getElementById('compounding-group').style.display = isFd ? 'block' : 'none';
+    document.getElementById('balance-label').textContent = isFd ? 'Principal Amount' : isMarket ? 'Total Invested' : 'Opening Balance';
+  }
+
   document.querySelectorAll('input[name="acct-type"]').forEach(radio => {
-    radio.addEventListener('change', function() {
-      if (this.value === 'savings') {
-        document.getElementById('balance-group').style.display = 'block';
-        document.getElementById('limit-group').style.display = 'none';
-      } else {
-        document.getElementById('balance-group').style.display = 'none';
-        document.getElementById('limit-group').style.display = 'block';
-      }
-    });
+    radio.addEventListener('change', function() { updateTypeFields(this.value, getSubtype()); });
+  });
+  document.querySelectorAll('input[name="inv-subtype"]').forEach(radio => {
+    radio.addEventListener('change', function() { updateTypeFields('investment', this.value); });
   });
 
   // Toast helper
@@ -419,35 +498,57 @@
     document.getElementById('acct-type-savings').checked = true;
     document.getElementById('acct-balance').value = '';
     document.getElementById('acct-limit').value = '';
-    document.getElementById('balance-group').style.display = 'block';
-    document.getElementById('limit-group').style.display = 'none';
+    document.getElementById('acct-ticker').value = '';
+    document.getElementById('acct-units').value = '';
+    document.getElementById('acct-interest-rate').value = '';
+    document.getElementById('acct-start-date').value = '';
+    document.getElementById('acct-maturity-date').value = '';
+    document.getElementById('acct-compounding').value = 'quarterly';
+    document.getElementById('inv-subtype-market').checked = true;
     document.getElementById('acct-type-group').style.display = 'block';
+    document.getElementById('inv-subtype-group').style.display = 'none';
+    updateTypeFields('savings', 'market');
     document.getElementById('acct-save-btn').textContent = 'Save Account';
     document.getElementById('acct-modal').classList.add('open');
   }
 
   // Open Edit modal
-  function openEditModal(id, name, type, value) {
+  function openEditModal(dataset) {
+    const acct = JSON.parse(dataset.acct);
     editMode = true;
     document.getElementById('acct-modal-title').textContent = 'Edit Account';
-    document.getElementById('acct-edit-id').value = id;
-    document.getElementById('acct-name').value = name;
+    document.getElementById('acct-edit-id').value = acct.id;
+    document.getElementById('acct-name').value = acct.name;
     document.getElementById('acct-save-btn').textContent = 'Save Changes';
 
     // Hide type toggle in edit mode (type cannot change)
     document.getElementById('acct-type-group').style.display = 'none';
 
-    if (type === 'savings') {
+    const subtype = acct.subtype || 'market';
+
+    if (acct.type === 'savings') {
       document.getElementById('acct-type-savings').checked = true;
-      document.getElementById('balance-group').style.display = 'block';
-      document.getElementById('limit-group').style.display = 'none';
-      document.getElementById('acct-balance').value = value;
+      document.getElementById('acct-balance').value = acct.balance || 0;
+    } else if (acct.type === 'investment') {
+      document.getElementById('acct-type-investment').checked = true;
+      document.getElementById('acct-balance').value = acct.balance || 0;
+      if (subtype === 'fd') {
+        document.getElementById('inv-subtype-fd').checked = true;
+        document.getElementById('acct-interest-rate').value = acct.interest_rate || '';
+        document.getElementById('acct-start-date').value = acct.start_date || '';
+        document.getElementById('acct-maturity-date').value = acct.maturity_date || '';
+        document.getElementById('acct-compounding').value = acct.compounding || 'quarterly';
+      } else {
+        document.getElementById('inv-subtype-market').checked = true;
+        document.getElementById('acct-ticker').value = acct.ticker || '';
+        document.getElementById('acct-units').value = acct.units || '';
+      }
+      document.getElementById('inv-subtype-group').style.display = 'block';
     } else {
       document.getElementById('acct-type-credit').checked = true;
-      document.getElementById('balance-group').style.display = 'none';
-      document.getElementById('limit-group').style.display = 'block';
-      document.getElementById('acct-limit').value = value;
+      document.getElementById('acct-limit').value = acct.limit || 0;
     }
+    updateTypeFields(acct.type, subtype);
 
     document.getElementById('acct-modal').classList.add('open');
   }
@@ -469,10 +570,23 @@
     const type = document.querySelector('input[name="acct-type"]:checked').value;
     const payload = { name };
 
+    const subtype = getSubtype();
+
     if (editMode) {
-      // Edit mode: send balance or limit based on type
+      // Edit mode: send fields based on type
       if (type === 'savings') {
         payload.balance = parseFloat(document.getElementById('acct-balance').value) || 0;
+      } else if (type === 'investment') {
+        payload.balance = parseFloat(document.getElementById('acct-balance').value) || 0;
+        if (subtype === 'fd') {
+          payload.interest_rate = parseFloat(document.getElementById('acct-interest-rate').value) || 0;
+          payload.start_date = document.getElementById('acct-start-date').value;
+          payload.maturity_date = document.getElementById('acct-maturity-date').value;
+          payload.compounding = document.getElementById('acct-compounding').value;
+        } else {
+          payload.ticker = document.getElementById('acct-ticker').value.trim();
+          payload.units = parseFloat(document.getElementById('acct-units').value) || 0;
+        }
       } else {
         payload.limit = parseFloat(document.getElementById('acct-limit').value) || 0;
       }
@@ -503,6 +617,18 @@
       payload.type = type;
       if (type === 'savings') {
         payload.balance = parseFloat(document.getElementById('acct-balance').value) || 0;
+      } else if (type === 'investment') {
+        payload.balance = parseFloat(document.getElementById('acct-balance').value) || 0;
+        payload.subtype = subtype;
+        if (subtype === 'fd') {
+          payload.interest_rate = parseFloat(document.getElementById('acct-interest-rate').value) || 0;
+          payload.start_date = document.getElementById('acct-start-date').value;
+          payload.maturity_date = document.getElementById('acct-maturity-date').value;
+          payload.compounding = document.getElementById('acct-compounding').value;
+        } else {
+          payload.ticker = document.getElementById('acct-ticker').value.trim();
+          payload.units = parseFloat(document.getElementById('acct-units').value) || 0;
+        }
       } else {
         payload.limit = parseFloat(document.getElementById('acct-limit').value) || 0;
       }

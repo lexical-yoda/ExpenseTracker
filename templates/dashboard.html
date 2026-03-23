@@ -10,6 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
   <link rel="stylesheet" href="/static/themes.css">
+  <script>document.documentElement.setAttribute('data-theme',(localStorage.getItem('em-palette')||'github')+'-'+(localStorage.getItem('em-mode')||'dark'));</script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -110,6 +111,7 @@
     }
     .acct-bal-dot.savings { background: var(--savings); }
     .acct-bal-dot.credit { background: var(--cc); }
+    .acct-bal-dot.investment { background: var(--accent); }
     .acct-bal-info { flex: 1; }
     .acct-bal-name { font-size: 0.8rem; font-weight: 500; margin-bottom: 2px; }
     .acct-bal-detail { font-size: 0.65rem; color: var(--muted); }
@@ -234,6 +236,12 @@
   <!-- Account balances -->
   <div class="section-label">Account Balances</div>
   <div class="acct-balances" id="acct-balances"></div>
+
+  <!-- Net worth -->
+  <div class="stat-card" style="margin-bottom: 24px; text-align: center;">
+    <div class="stat-label">NET WORTH</div>
+    <div class="stat-value" id="net-worth" style="font-size: 1.8rem;">Calculating...</div>
+  </div>
 
   <!-- Charts (two-column on desktop) -->
   <div class="charts-grid">
@@ -384,7 +392,10 @@
   // ── Render account balance cards ──
   function renderAccountBalances() {
     const container = document.getElementById('acct-balances');
-    container.innerHTML = balancesData.map(b => {
+    const nonInvestment = balancesData.filter(b => b.type !== 'investment');
+    const investments = balancesData.filter(b => b.type === 'investment');
+
+    let html = nonInvestment.map(b => {
       const isSavings = b.type === 'savings';
       const amount = isSavings ? fmt(b.current_balance || 0) : fmt(b.remaining || 0);
       const detail = isSavings ? 'Current balance' : `Spent ${fmt(b.accumulated || 0)} of ${fmt(b.limit || 0)}`;
@@ -397,6 +408,96 @@
         <div class="acct-bal-amount" style="color:var(--${isSavings ? 'savings' : 'cc'})">${amount}</div>
       </div>`;
     }).join('');
+
+    // Investment cards with loading state
+    if (investments.length > 0) {
+      html += investments.map(b => {
+        const isFd = b.subtype === 'fd';
+        const detail = isFd
+          ? `${fmt(b.invested || 0)} @ ${b.interest_rate || 0}% p.a.`
+          : `${b.units || 0} units · Invested ${fmt(b.invested || 0)}`;
+        return `<div class="acct-bal-card" id="inv-card-${b.id}">
+          <span class="acct-bal-dot investment"></span>
+          <div class="acct-bal-info">
+            <div class="acct-bal-name">${b.name}</div>
+            <div class="acct-bal-detail">${detail}</div>
+          </div>
+          <div class="acct-bal-amount inv-loading" style="color:var(--muted)">Loading...</div>
+        </div>`;
+      }).join('');
+    }
+
+    container.innerHTML = html;
+
+    // Fetch live prices for investments
+    if (investments.length > 0) {
+      fetch('/api/investments/prices')
+        .then(r => r.json())
+        .then(prices => {
+          prices.forEach(p => {
+            const card = document.getElementById('inv-card-' + p.id);
+            if (!card) return;
+            const amtEl = card.querySelector('.acct-bal-amount');
+            const detailEl = card.querySelector('.acct-bal-detail');
+
+            if (p.subtype === 'fd') {
+              if (p.current_value !== null) {
+                const pnlSign = p.pnl >= 0 ? '+' : '';
+                const pnlColor = 'var(--success)';
+                amtEl.textContent = fmt(p.current_value);
+                amtEl.style.color = pnlColor;
+                amtEl.classList.remove('inv-loading');
+                const maturityInfo = p.matured
+                  ? '<span style="color:var(--success)">Matured</span>'
+                  : `${p.days_remaining}d remaining · Maturity ${fmt(p.maturity_value)}`;
+                detailEl.innerHTML = `${fmt(p.principal)} @ ${p.interest_rate}% · <span style="color:${pnlColor}">${pnlSign}${fmt(p.pnl)}</span> · ${maturityInfo}`;
+              } else {
+                amtEl.textContent = 'Calculation error';
+                amtEl.style.color = 'var(--muted)';
+              }
+            } else if (p.price !== null) {
+              const pnlSign = p.pnl >= 0 ? '+' : '';
+              const pnlColor = p.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
+              amtEl.textContent = fmt(p.current_value);
+              amtEl.style.color = pnlColor;
+              amtEl.classList.remove('inv-loading');
+              detailEl.innerHTML = `${p.units} units @ ${fmt(p.price)} · <span style="color:${pnlColor}">${pnlSign}${fmt(p.pnl)} (${pnlSign}${p.pnl_pct}%)</span>`;
+            } else {
+              amtEl.textContent = 'Price unavailable';
+              amtEl.style.color = 'var(--muted)';
+            }
+          });
+
+          // Update net worth if we have it
+          renderNetWorth(prices);
+        })
+        .catch(() => {
+          investments.forEach(b => {
+            const card = document.getElementById('inv-card-' + b.id);
+            if (!card) return;
+            const amtEl = card.querySelector('.acct-bal-amount');
+            amtEl.textContent = 'Price unavailable';
+            amtEl.style.color = 'var(--muted)';
+          });
+        });
+    }
+  }
+
+  function renderNetWorth(investmentPrices) {
+    let netWorth = 0;
+    balancesData.forEach(b => {
+      if (b.type === 'savings') netWorth += (b.current_balance || 0);
+      else if (b.type === 'credit') netWorth -= (b.accumulated || 0);
+    });
+    investmentPrices.forEach(p => {
+      if (p.current_value !== null) netWorth += p.current_value;
+    });
+
+    const el = document.getElementById('net-worth');
+    if (el) {
+      el.textContent = fmt(netWorth);
+      el.style.color = netWorth >= 0 ? 'var(--success)' : 'var(--danger)';
+    }
   }
 
   // ── Render recent transactions ──
@@ -406,6 +507,7 @@
       container.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:20px 0;text-align:center">No transactions in this period</div>';
       return;
     }
+    const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
     container.innerHTML = txns.map(t => {
       const type = accountTypeMap[t.account] || 'savings';
       const isIncome = t.type === 'Income';
@@ -415,8 +517,8 @@
       return `<div class="recent-item">
         <span class="recent-dot ${type}"></span>
         <div class="recent-info">
-          <div class="recent-desc">${t.description}</div>
-          <div class="recent-meta">${t.category} · ${t.date.slice(5)}</div>
+          <div class="recent-desc">${esc(t.description)}</div>
+          <div class="recent-meta">${esc(t.category)} · ${esc(t.date.slice(5))}</div>
         </div>
         <div class="recent-amount ${amtClass}">${prefix}${fmt(t.amount)}</div>
       </div>`;

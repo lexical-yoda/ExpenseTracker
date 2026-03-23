@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/themes.css">
+  <script>document.documentElement.setAttribute('data-theme',(localStorage.getItem('em-palette')||'github')+'-'+(localStorage.getItem('em-mode')||'dark'));</script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -326,6 +327,21 @@
       letter-spacing: 1px;
       color: var(--muted);
       margin-bottom: 10px;
+    }
+    .day-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 14px 0 6px 0;
+      font-family: var(--font-mono);
+    }
+    .day-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
       padding-bottom: 8px;
       border-bottom: 1px solid var(--border);
     }
@@ -650,6 +666,11 @@
           </div>
         </div>
 
+        <div class="form-group" id="units-group" style="display:none">
+          <label for="units">Units</label>
+          <input type="number" id="units" placeholder="Number of units bought/sold" step="0.001" min="0" inputmode="decimal">
+        </div>
+
         <hr class="divider">
 
         <div class="form-group">
@@ -710,14 +731,19 @@
   {% endfor %}
 
   <div id="txn-list">
-    {% set ns = namespace(cur_month='') %}
+    {% set ns = namespace(cur_month='', cur_day='') %}
     {% for txn in parents %}
       {% set txn_month = txn.date[:7] %}
       {% if txn_month != ns.cur_month %}
         {% set ns.cur_month = txn_month %}
+        {% set ns.cur_day = '' %}
         <div class="month-label" data-month="{{ txn_month }}">
           {{ txn.date[5:7] }}/{{ txn.date[:4] }}
         </div>
+      {% endif %}
+      {% if txn.date != ns.cur_day %}
+        {% set ns.cur_day = txn.date %}
+        <div class="day-label">{{ txn.date|dayname }}, {{ txn.date[8:] }}/{{ txn.date[5:7] }}/{{ txn.date[:4] }}</div>
       {% endif %}
 
       <div class="txn-card{{ '' if txn.track else ' untracked' }}" data-id="{{ txn.id }}" data-desc="{{ txn.description|lower }}" data-cat="{{ txn.category|lower }}">
@@ -731,7 +757,7 @@
             </div>
           </div>
           <div class="txn-right">
-            <div class="txn-amount {{ 'income' if txn.type == 'Income' else 'transfer' if txn.type == 'Transfer' else '' }}">{% if txn.type == 'Income' %}+{% elif txn.type == 'Transfer' %}⇄{% else %}-{% endif %}₹{{ "%.2f"|format(txn.amount) }}</div>
+            <div class="txn-amount {{ 'income' if txn.type == 'Income' else 'transfer' if txn.type == 'Transfer' else '' }}">{% if txn.type == 'Income' %}+{% elif txn.type == 'Transfer' %}⇄{% else %}-{% endif %}₹{{ "%.2f"|format(txn.amount) }}{% if txn.units %} <span style="font-size:0.65rem;color:var(--muted)">({{ txn.units }} units)</span>{% endif %}</div>
             <div class="txn-date">{{ txn.date[8:] }}/{{ txn.date[5:7] }}</div>
           </div>
           <div class="txn-actions" onclick="event.stopPropagation()">
@@ -837,6 +863,11 @@
       <input type="number" id="edit-amount" step="0.01" min="0" required inputmode="decimal">
     </div>
 
+    <div class="form-group" id="edit-units-group" style="display:none">
+      <label for="edit-units">Units</label>
+      <input type="number" id="edit-units" step="0.001" min="0" inputmode="decimal">
+    </div>
+
     <div class="form-group">
       <label for="edit-category">Category</label>
       <select id="edit-category" required>
@@ -934,6 +965,20 @@
   const accounts = {{ accounts | tojson }};
   const accountTypes = {};
   accounts.forEach(a => accountTypes[a.name] = a.type);
+
+  // Show/hide units field based on selected account type
+  const acctSelect = document.getElementById('account');
+  if (acctSelect) {
+    acctSelect.addEventListener('change', function() {
+      const unitsGroup = document.getElementById('units-group');
+      if (accountTypes[this.value] === 'investment') {
+        unitsGroup.style.display = 'block';
+      } else {
+        unitsGroup.style.display = 'none';
+        document.getElementById('units').value = '';
+      }
+    });
+  }
   let modalMode = 'category'; // 'category' or 'subcategory'
   let deleteTargetId = null;
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -1055,6 +1100,8 @@
     btn.textContent = 'Saving…';
 
     const parentIdEl = document.getElementById('parent_id');
+    const unitsEl = document.getElementById('units');
+    const unitsVal = unitsEl && unitsEl.value ? parseFloat(unitsEl.value) : null;
     const payload = {
       date: document.getElementById('date').value,
       description: document.getElementById('description').value,
@@ -1064,6 +1111,7 @@
       sub_category: document.getElementById('sub_category').value,
       parent_id: parentIdEl ? parseInt(parentIdEl.value) : null,
       type: document.querySelector('input[name="txn_type"]:checked').value,
+      units: unitsVal,
     };
 
     try {
@@ -1075,8 +1123,83 @@
       const data = await res.json();
 
       if (data.success) {
-        const typeLabel = payload.type === 'Income' ? 'Income' : 'Expense';
+        const typeLabel = payload.type === 'Income' ? 'Income' : payload.type === 'Transfer' ? 'Transfer' : 'Expense';
         showToast(typeLabel + ' saved ✓', 'success');
+
+        {% if not parent %}
+        // Insert new transaction into list without reload
+        if (!payload.parent_id) {
+          const txnList = document.getElementById('txn-list');
+          if (txnList) {
+            const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+            const acctType = accountTypes[payload.account] || 'savings';
+            const dotClass = acctType === 'savings' ? 'savings' : acctType === 'credit' ? 'cc' : 'investment';
+            const amtPrefix = payload.type === 'Income' ? '+' : payload.type === 'Transfer' ? '⇄' : '-';
+            const amtClass = payload.type === 'Income' ? 'income' : payload.type === 'Transfer' ? 'transfer' : '';
+            const amt = parseFloat(payload.amount).toFixed(2);
+            const dateParts = payload.date.split('-');
+            const unitsHtml = payload.units ? ` <span style="font-size:0.65rem;color:var(--muted)">(${esc(String(payload.units))} units)</span>` : '';
+            const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+            const dayName = dayNames[new Date(payload.date).getDay()];
+            const dayLabel = `${esc(dayName)}, ${esc(dateParts[2])}/${esc(dateParts[1])}/${esc(dateParts[0])}`;
+
+            const existingDayLabels = txnList.querySelectorAll('.day-label');
+            let needsDayHeader = true;
+            existingDayLabels.forEach(dl => { if (dl.textContent.trim() === `${dayName}, ${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`) needsDayHeader = false; });
+
+            const card = document.createElement('div');
+            card.className = 'txn-card';
+            card.dataset.id = data.id;
+            card.dataset.desc = payload.description.toLowerCase();
+            card.dataset.cat = payload.category.toLowerCase();
+            card.innerHTML = `<div class="txn-main" onclick="toggleCard(this.parentElement)">
+                <span class="txn-dot ${esc(dotClass)}"></span>
+                <div class="txn-info">
+                  <div class="txn-desc">${esc(payload.description)}</div>
+                  <div class="txn-meta">
+                    <span class="txn-cat">${esc(payload.category)}</span>
+                    ${payload.sub_category ? '<span>' + esc(payload.sub_category) + '</span>' : ''}
+                  </div>
+                </div>
+                <div class="txn-right">
+                  <div class="txn-amount ${esc(amtClass)}">${esc(amtPrefix)}₹${esc(amt)}${unitsHtml}</div>
+                  <div class="txn-date">${esc(dateParts[2])}/${esc(dateParts[1])}</div>
+                </div>
+                <div class="txn-actions" onclick="event.stopPropagation()">
+                  <button class="action-btn track tracked" onclick="toggleTrack(${parseInt(data.id)}, true)" title="Tracked in dashboard">&#9673;</button>
+                  <button class="action-btn" onclick="openEditModal(${parseInt(data.id)})" title="Edit">&#9998;</button>
+                  <button class="action-btn del" onclick="confirmDelete(${parseInt(data.id)}, false)" title="Delete">&#10005;</button>
+                </div>
+                <span class="expand-icon">▾</span>
+              </div>
+              <div class="sub-items">
+                <button class="add-sub-btn" onclick="event.stopPropagation(); openSubModal(${parseInt(data.id)}, '${esc(payload.description).replace(/'/g, "\\'")}', ${parseFloat(payload.amount)}, '${esc(payload.account).replace(/'/g, "\\'")}', '${esc(payload.category).replace(/'/g, "\\'")}', '${esc(payload.date)}')">+ add sub-expense</button>
+              </div>`;
+
+            let inserted = false;
+            const cards = txnList.querySelectorAll('.txn-card');
+            for (const c of cards) {
+              if (parseInt(c.dataset.id) < data.id) {
+                if (needsDayHeader) c.insertAdjacentHTML('beforebegin', `<div class="day-label">${dayLabel}</div>`);
+                c.before(card);
+                inserted = true;
+                break;
+              }
+            }
+            if (!inserted) {
+              if (needsDayHeader) txnList.insertAdjacentHTML('beforeend', `<div class="day-label">${dayLabel}</div>`);
+              txnList.appendChild(card);
+            }
+
+            const countEl = document.getElementById('txn-count');
+            if (countEl) {
+              const current = parseInt(countEl.textContent) || 0;
+              countEl.textContent = (current + 1) + ' transactions';
+            }
+          }
+        }
+        {% endif %}
+
         setTimeout(() => {
           {% if parent %}
           window.location.href = '/manage';
@@ -1085,10 +1208,11 @@
           document.getElementById('date').value = '{{ today }}';
           document.getElementById('sub_category').innerHTML = '<option value="">None</option>';
           document.getElementById('new-subcat-btn').disabled = true;
+          document.getElementById('units-group').style.display = 'none';
           btn.disabled = false;
           btn.textContent = 'Save Expense';
           {% endif %}
-        }, 800);
+        }, 300);
       } else {
         showToast('Error: ' + data.error, 'error');
         btn.disabled = false;
@@ -1167,6 +1291,16 @@
     document.getElementById('edit-category').value = txn.category;
     populateSubcategories('edit-subcategory', txn.category, txn.sub_category);
 
+    // Show units field if investment account
+    const editUnitsGroup = document.getElementById('edit-units-group');
+    if (accountTypes[txn.account] === 'investment') {
+      editUnitsGroup.style.display = 'block';
+      document.getElementById('edit-units').value = txn.units || '';
+    } else {
+      editUnitsGroup.style.display = 'none';
+      document.getElementById('edit-units').value = '';
+    }
+
     document.getElementById('edit-title').textContent = txn.parent_id ? 'Edit Sub-item' : 'Edit Transaction';
     document.getElementById('edit-modal').classList.add('open');
   }
@@ -1175,12 +1309,24 @@
     if (e.target === this) this.classList.remove('open');
   });
 
+  document.getElementById('edit-account').addEventListener('change', function() {
+    const editUnitsGroup = document.getElementById('edit-units-group');
+    if (accountTypes[this.value] === 'investment') {
+      editUnitsGroup.style.display = 'block';
+    } else {
+      editUnitsGroup.style.display = 'none';
+      document.getElementById('edit-units').value = '';
+    }
+  });
+
   document.getElementById('edit-save-btn').addEventListener('click', async function() {
     const btn = this;
     btn.disabled = true;
     btn.textContent = 'Saving...';
 
     const txnId = document.getElementById('edit-txn-id').value;
+    const editUnitsEl = document.getElementById('edit-units');
+    const editUnitsVal = editUnitsEl && editUnitsEl.value ? parseFloat(editUnitsEl.value) : null;
     const payload = {
       date: document.getElementById('edit-date').value,
       description: document.getElementById('edit-desc').value,
@@ -1189,6 +1335,7 @@
       category: document.getElementById('edit-category').value,
       sub_category: document.getElementById('edit-subcategory').value,
       type: document.querySelector('input[name="edit-type"]:checked').value,
+      units: editUnitsVal,
     };
 
     try {
