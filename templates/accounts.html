@@ -325,7 +325,7 @@
             {% elif acct.type == 'investment' %}
               {{ acct.units|default(0) }} units · Invested: ₹{{ "%.2f"|format(acct.balance|default(0)) }}{% if acct.ticker %} · {{ acct.ticker }}{% endif %}
             {% else %}
-              Limit: ₹{{ "%.2f"|format(acct.limit if acct.limit else 0) }} | Remaining: ₹{{ "%.2f"|format(bal.remaining if bal else 0) }}
+              Limit: ₹{{ "%.2f"|format(acct.limit if acct.limit else 0) }} | Remaining: ₹{{ "%.2f"|format(bal.remaining if bal else 0) }}{% if acct.billing_date %} | Billing: {{ acct.billing_date }}th{% endif %}
             {% endif %}
           </div>
         </div>
@@ -377,6 +377,11 @@
     <div class="form-group" id="limit-group" style="display:none">
       <label for="acct-limit">Credit Limit</label>
       <input type="number" id="acct-limit" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+    </div>
+
+    <div class="form-group" id="billing-date-group" style="display:none">
+      <label for="acct-billing-date">Billing Cycle Date (day of month)</label>
+      <input type="number" id="acct-billing-date" min="1" max="31" placeholder="e.g. 14" inputmode="numeric">
     </div>
 
     <div id="inv-subtype-group" style="display:none">
@@ -468,6 +473,7 @@
 
     document.getElementById('balance-group').style.display = (type === 'savings' || isInv) ? 'block' : 'none';
     document.getElementById('limit-group').style.display = type === 'credit' ? 'block' : 'none';
+    document.getElementById('billing-date-group').style.display = type === 'credit' ? 'block' : 'none';
     document.getElementById('inv-subtype-group').style.display = isInv ? 'block' : 'none';
     document.getElementById('ticker-group').style.display = isMarket ? 'block' : 'none';
     document.getElementById('units-group').style.display = isMarket ? 'block' : 'none';
@@ -496,6 +502,7 @@
     document.getElementById('acct-type-savings').checked = true;
     document.getElementById('acct-balance').value = '';
     document.getElementById('acct-limit').value = '';
+    document.getElementById('acct-billing-date').value = '';
     document.getElementById('acct-ticker').value = '';
     document.getElementById('acct-units').value = '';
     document.getElementById('acct-interest-rate').value = '';
@@ -545,6 +552,7 @@
     } else {
       document.getElementById('acct-type-credit').checked = true;
       document.getElementById('acct-limit').value = acct.limit || 0;
+      document.getElementById('acct-billing-date').value = acct.billing_date || '';
     }
     updateTypeFields(acct.type, subtype);
 
@@ -587,6 +595,8 @@
         }
       } else {
         payload.limit = parseFloat(document.getElementById('acct-limit').value) || 0;
+        const bd = parseInt(document.getElementById('acct-billing-date').value);
+        if (bd >= 1 && bd <= 31) payload.billing_date = bd;
       }
 
       const id = document.getElementById('acct-edit-id').value;
@@ -629,6 +639,8 @@
         }
       } else {
         payload.limit = parseFloat(document.getElementById('acct-limit').value) || 0;
+        const bd = parseInt(document.getElementById('acct-billing-date').value);
+        if (bd >= 1 && bd <= 31) payload.billing_date = bd;
       }
 
       try {

@@ -233,8 +233,8 @@
       <div class="stat-value" id="stat-avg">₹0</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Top Category</div>
-      <div class="stat-value" id="stat-topcat" style="font-size:0.85rem">—</div>
+      <div class="stat-label">Spent Today</div>
+      <div class="stat-value" id="stat-today">₹0</div>
     </div>
   </div>
 
@@ -242,10 +242,52 @@
   <div class="section-label">Account Balances</div>
   <div class="acct-balances" id="acct-balances"></div>
 
-  <!-- Net worth -->
-  <div class="stat-card" style="margin-bottom: 24px; text-align: center;">
-    <div class="stat-label">NET WORTH</div>
-    <div class="stat-value" id="net-worth" style="font-size: 1.8rem;">Calculating...</div>
+  <!-- CC Billing Cycle -->
+  <div id="billing-cycle-section" style="display:none; margin-bottom: 24px;">
+    <div class="section-label">Credit Card Billing Cycle</div>
+    <div class="stats-row" id="billing-stats">
+      <div class="stat-card">
+        <div class="stat-label">Current Cycle Spend</div>
+        <div class="stat-value" id="billing-spent" style="color:var(--cc)">₹0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Cycle Period</div>
+        <div class="stat-value" id="billing-period" style="font-size:0.8rem">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Days Remaining</div>
+        <div class="stat-value" id="billing-days">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Projected Bill</div>
+        <div class="stat-value" id="billing-projected" style="color:var(--cc)">₹0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total CC Outstanding</div>
+        <div class="stat-value" id="billing-total" style="color:var(--cc)">₹0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Net worth with goal -->
+  <div class="stat-card" style="margin-bottom: 24px; padding: 20px 24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <div>
+        <div class="stat-label">NET WORTH</div>
+        <div class="stat-value" id="net-worth" style="font-size: 1.8rem;">Calculating...</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="stat-label">NEXT MILESTONE</div>
+        <div class="stat-value" id="nw-milestone" style="font-size: 1.2rem; color:var(--muted)">—</div>
+      </div>
+    </div>
+    <div style="background:var(--border); border-radius:8px; height:12px; overflow:hidden; margin-top:8px;">
+      <div id="nw-progress-bar" style="height:100%; border-radius:8px; transition:width 0.8s ease; width:0%; background:var(--accent);"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; margin-top:4px; font-size:0.7rem; color:var(--muted);">
+      <span id="nw-progress-label">0%</span>
+      <span id="nw-remaining-label">—</span>
+    </div>
   </div>
 
   <!-- Charts (two-column on desktop) -->
@@ -385,9 +427,15 @@
     const numDays = Object.keys(daily).length || 1;
     const avgDaily = totalExpense / numDays;
 
-    const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
+    const today = new Date().toISOString().slice(0, 10);
+    let spentToday = 0;
+    (rawSummary.transactions || []).forEach(t => {
+      if (!t.parent_id && t.date === today && t.type === 'Expense' && t.track !== false) {
+        spentToday += t.amount;
+      }
+    });
 
-    return { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, topCat, recentTxns };
+    return { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, spentToday, recentTxns };
   }
 
   function fmt(n) {
@@ -493,6 +541,85 @@
     }
   }
 
+  // ── CC Billing Cycle ──
+  function renderBillingCycle() {
+    // Find credit card accounts with billing_date
+    const ccAccounts = accountsData.filter(a => a.type === 'credit' && a.billing_date);
+    const section = document.getElementById('billing-cycle-section');
+    if (!ccAccounts.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+
+    const cc = ccAccounts[0]; // Primary CC
+    const billingDate = cc.billing_date;
+    const now = new Date();
+    const today = now.getDate();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Calculate current billing cycle start and end
+    let cycleStart, cycleEnd;
+    if (today >= billingDate) {
+      // We're in the cycle that started this month
+      cycleStart = new Date(currentYear, currentMonth, billingDate);
+      cycleEnd = new Date(currentYear, currentMonth + 1, billingDate - 1);
+    } else {
+      // We're in the cycle that started last month
+      cycleStart = new Date(currentYear, currentMonth - 1, billingDate);
+      cycleEnd = new Date(currentYear, currentMonth, billingDate - 1);
+    }
+
+    const cycleStartStr = cycleStart.toISOString().slice(0, 10);
+    const cycleEndStr = cycleEnd.toISOString().slice(0, 10);
+    const todayStr = now.toISOString().slice(0, 10);
+
+    // Sum CC expenses in current billing cycle
+    let cycleSpend = 0;
+    let cycleDaysWithSpend = new Set();
+    (rawSummary.transactions || []).forEach(t => {
+      if (!t.parent_id && t.account === cc.name && t.type === 'Expense' && t.track !== false) {
+        if (t.date >= cycleStartStr && t.date <= todayStr) {
+          cycleSpend += t.amount;
+          cycleDaysWithSpend.add(t.date);
+        }
+      }
+    });
+
+    // Days elapsed and remaining
+    const msPerDay = 86400000;
+    const daysElapsed = Math.max(1, Math.round((now - cycleStart) / msPerDay));
+    const totalDays = Math.round((cycleEnd - cycleStart) / msPerDay) + 1;
+    const daysRemaining = Math.max(0, totalDays - daysElapsed);
+
+    // Projected bill
+    const dailyAvg = cycleSpend / daysElapsed;
+    const projected = dailyAvg * totalDays;
+
+    // Total CC outstanding from balances
+    const ccBalance = balancesData.find(b => b.name === cc.name);
+    const totalOutstanding = ccBalance ? (ccBalance.accumulated || 0) : 0;
+
+    // Format cycle period
+    const fmtDate = d => `${d.getDate()}/${d.getMonth()+1}`;
+
+    document.getElementById('billing-spent').textContent = fmt(cycleSpend);
+    document.getElementById('billing-period').textContent = `${fmtDate(cycleStart)} — ${fmtDate(cycleEnd)}`;
+    document.getElementById('billing-days').textContent = daysRemaining;
+    document.getElementById('billing-projected').textContent = fmt(projected);
+    document.getElementById('billing-total').textContent = fmt(totalOutstanding);
+  }
+
+  const nwGoalIncrement = {{ nw_goal_increment|default(500000) }};
+
+  function computeMilestone(netWorth, increment) {
+    if (increment <= 0) return 500000;
+    if (netWorth <= 0) return increment;
+    const milestone = Math.ceil(netWorth / increment) * increment;
+    return netWorth === milestone ? milestone + increment : milestone;
+  }
+
   function renderNetWorth(investmentPrices) {
     let netWorth = 0;
     balancesData.forEach(b => {
@@ -508,6 +635,18 @@
       el.textContent = fmt(netWorth);
       el.style.color = netWorth >= 0 ? 'var(--success)' : 'var(--danger)';
     }
+
+    // Net worth goal progress
+    const milestone = computeMilestone(netWorth, nwGoalIncrement);
+    const prevMilestone = milestone - nwGoalIncrement;
+    const progress = netWorth <= prevMilestone ? 0 : Math.min(100, ((netWorth - prevMilestone) / nwGoalIncrement) * 100);
+    const remaining = milestone - netWorth;
+
+    document.getElementById('nw-milestone').textContent = fmt(milestone);
+    document.getElementById('nw-progress-bar').style.width = Math.max(0, progress) + '%';
+    document.getElementById('nw-progress-bar').style.background = progress >= 100 ? 'var(--success)' : 'var(--accent)';
+    document.getElementById('nw-progress-label').textContent = Math.round(progress) + '% there';
+    document.getElementById('nw-remaining-label').textContent = remaining > 0 ? fmt(remaining) + ' to go' : 'Goal reached!';
   }
 
   // ── Render recent transactions ──
@@ -536,7 +675,7 @@
   }
 
   function renderAll(filter, animate = true) {
-    const { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, topCat, recentTxns } = filterData(filter);
+    const { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, spentToday, recentTxns } = filterData(filter);
     const c = getThemeColors();
 
     // Stats with animated counters
@@ -561,7 +700,12 @@
     }
     netEl.style.color = net >= 0 ? c.SUCCESS : 'var(--danger)';
 
-    document.getElementById('stat-topcat').textContent = topCat ? topCat[0] : '—';
+    const todayEl = document.getElementById('stat-today');
+    if (animate) {
+      animateCounter(todayEl, spentToday, { formatter: fmtINR, duration: 450 });
+    } else {
+      todayEl.textContent = fmt(spentToday);
+    }
 
     // Trigger stagger animation on stat cards
     if (animate) {
@@ -571,6 +715,9 @@
 
     // Account balances
     renderAccountBalances();
+
+    // CC Billing Cycle
+    renderBillingCycle();
 
     // Recent transactions
     renderRecent(recentTxns);

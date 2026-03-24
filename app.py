@@ -97,11 +97,43 @@ def load_auth():
     return None
 
 
-def save_auth(username, password_hash):
+def save_auth(username, password_hash, extra=None):
     os.makedirs(DATA_DIR, exist_ok=True)
+    data = {'username': username, 'password_hash': password_hash}
+    # Preserve existing extra fields
+    existing = load_auth()
+    if existing:
+        for k, v in existing.items():
+            if k not in data:
+                data[k] = v
+    if extra:
+        data.update(extra)
     with open(AUTH_FILE, 'w') as f:
-        json.dump({'username': username, 'password_hash': password_hash}, f, indent=2)
+        json.dump(data, f, indent=2)
     os.chmod(AUTH_FILE, 0o600)
+
+
+def get_nw_goal():
+    """Get net worth goal config. Returns (increment, current_milestone)."""
+    auth = load_auth()
+    if not auth:
+        return 500000, 500000
+    increment = auth.get('nw_goal_increment', 500000)
+    return increment, increment
+
+
+def compute_nw_milestone(net_worth, increment):
+    """Calculate the current milestone based on net worth and increment."""
+    if increment <= 0:
+        return 500000
+    if net_worth <= 0:
+        return increment
+    import math
+    milestone = math.ceil(net_worth / increment) * increment
+    # If exactly at a milestone, target the next one
+    if net_worth > 0 and net_worth == milestone:
+        milestone += increment
+    return milestone
 
 
 def is_setup_complete():
@@ -178,8 +210,13 @@ def setup():
 
             os.makedirs(DATA_DIR, exist_ok=True)
 
-            # Save auth
-            save_auth(username, pw_hash)
+            # Parse net worth goal increment
+            nw_increment = float(request.form.get('nw_goal_increment', 500000) or 500000)
+            if nw_increment < 10000:
+                nw_increment = 500000
+
+            # Save auth with goal config
+            save_auth(username, pw_hash, extra={'nw_goal_increment': nw_increment})
 
             # Parse accounts from form
             accounts = []
@@ -320,7 +357,8 @@ def dashboard():
     summary = get_monthly_summary()
     accounts = load_accounts()
     balances = compute_account_balances()
-    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances)
+    nw_increment, _ = get_nw_goal()
+    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, nw_goal_increment=nw_increment)
 
 
 @app.route('/analytics')
@@ -480,6 +518,8 @@ def api_add_account():
         new_account['balance'] = float(data.get('balance', 0))
     elif acct_type == 'credit':
         new_account['limit'] = float(data.get('limit', 0))
+        if 'billing_date' in data:
+            new_account['billing_date'] = int(data['billing_date'])
     elif acct_type == 'investment':
         subtype = data.get('subtype', 'market').strip()
         new_account['subtype'] = subtype
@@ -522,6 +562,8 @@ def api_update_account(account_id):
         acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
     elif acct['type'] == 'credit':
         acct['limit'] = float(data.get('limit', acct.get('limit', 0)))
+        if 'billing_date' in data:
+            acct['billing_date'] = int(data['billing_date'])
     elif acct['type'] == 'investment':
         acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
         subtype = acct.get('subtype', 'market')
@@ -631,6 +673,23 @@ def calculate_fd_value(principal, annual_rate, start_date, maturity_date, compou
         'days_remaining': days_remaining,
         'matured': today >= maturity,
     }
+
+
+@app.route('/api/settings/nw-goal', methods=['PUT'])
+@login_required
+def api_update_nw_goal():
+    data = request.get_json()
+    increment = float(data.get('increment', 500000))
+    if increment < 10000:
+        return jsonify({'success': False, 'error': 'Minimum increment is ₹10,000'}), 400
+    auth = load_auth()
+    if auth:
+        auth['nw_goal_increment'] = increment
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(AUTH_FILE, 'w') as f:
+            json.dump(auth, f, indent=2)
+        os.chmod(AUTH_FILE, 0o600)
+    return jsonify({'success': True, 'increment': increment})
 
 
 @app.route('/api/investments/prices', methods=['GET'])
