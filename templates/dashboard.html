@@ -267,6 +267,20 @@
         <div class="stat-value" id="billing-total" style="color:var(--cc)">₹0</div>
       </div>
     </div>
+    <div class="stats-row" style="margin-top: 8px;">
+      <div class="stat-card">
+        <div class="stat-label">Previous Cycle Bill</div>
+        <div class="stat-value" id="billing-prev" style="color:var(--cc)">₹0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Previous Period</div>
+        <div class="stat-value" id="billing-prev-period" style="font-size:0.8rem">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Cycle-over-Cycle</div>
+        <div class="stat-value" id="billing-coc" style="font-size:0.85rem">—</div>
+      </div>
+    </div>
   </div>
 
   <!-- Net worth with goal -->
@@ -604,11 +618,54 @@
     // Format cycle period
     const fmtDate = d => `${d.getDate()}/${d.getMonth()+1}`;
 
+    // Calculate previous billing cycle
+    let prevStart, prevEnd;
+    if (today >= billingDate) {
+      prevStart = new Date(currentYear, currentMonth - 1, billingDate);
+      prevEnd = new Date(currentYear, currentMonth, billingDate - 1);
+    } else {
+      prevStart = new Date(currentYear, currentMonth - 2, billingDate);
+      prevEnd = new Date(currentYear, currentMonth - 1, billingDate - 1);
+    }
+
+    const prevStartStr = prevStart.toISOString().slice(0, 10);
+    const prevEndStr = prevEnd.toISOString().slice(0, 10);
+
+    let prevSpend = 0;
+    (rawSummary.transactions || []).forEach(t => {
+      if (!t.parent_id && t.account === cc.name && t.type === 'Expense' && t.track !== false) {
+        if (t.date >= prevStartStr && t.date <= prevEndStr) {
+          prevSpend += t.amount;
+        }
+      }
+    });
+
+    // Cycle-over-cycle comparison
+    let cocText = '—';
+    let cocColor = 'var(--muted)';
+    if (prevSpend > 0) {
+      const diff = cycleSpend - prevSpend;
+      const pct = ((diff / prevSpend) * 100).toFixed(1);
+      if (diff > 0) {
+        cocText = `↑ ${fmt(Math.abs(diff))} (+${pct}%)`;
+        cocColor = 'var(--danger)';
+      } else if (diff < 0) {
+        cocText = `↓ ${fmt(Math.abs(diff))} (${pct}%)`;
+        cocColor = 'var(--success)';
+      } else {
+        cocText = 'No change';
+      }
+    }
+
     document.getElementById('billing-spent').textContent = fmt(cycleSpend);
     document.getElementById('billing-period').textContent = `${fmtDate(cycleStart)} — ${fmtDate(cycleEnd)}`;
     document.getElementById('billing-days').textContent = daysRemaining;
     document.getElementById('billing-projected').textContent = fmt(projected);
     document.getElementById('billing-total').textContent = fmt(totalOutstanding);
+    document.getElementById('billing-prev').textContent = fmt(prevSpend);
+    document.getElementById('billing-prev-period').textContent = `${fmtDate(prevStart)} — ${fmtDate(prevEnd)}`;
+    document.getElementById('billing-coc').textContent = cocText;
+    document.getElementById('billing-coc').style.color = cocColor;
   }
 
   const nwGoalIncrement = {{ nw_goal_increment|default(500000) }};
