@@ -310,6 +310,10 @@
       <div class="chart-title">Daily Spending</div>
       <div class="chart-wrap" id="chart-daily" style="height:240px"></div>
     </div>
+    <div class="chart-card full-width">
+      <div class="chart-title">Cumulative Average Spending / Day</div>
+      <div class="chart-wrap" id="chart-cumavg" style="height:220px"></div>
+    </div>
     <div class="chart-card">
       <div class="chart-title">By Category</div>
       <div class="chart-wrap" id="chart-category" style="height:300px"></div>
@@ -798,6 +802,28 @@
       const clickedDate = data.points[0].x; // YYYY-MM-DD
       window.location.href = '/manage?date=' + clickedDate;
     });
+
+    // Cumulative average chart
+    if (dailyDates.length > 0) {
+      let cumSum = 0;
+      const cumAvgDates = [];
+      const cumAvgVals = [];
+      for (let i = 0; i < dailyDates.length; i++) {
+        cumSum += dailyVals[i];
+        cumAvgDates.push(dailyDates[i]);
+        cumAvgVals.push(Math.round(cumSum / (i + 1)));
+      }
+      Plotly.react('chart-cumavg', [{
+        x: cumAvgDates, y: cumAvgVals, type: 'scatter', mode: 'lines+markers',
+        line: { color: c.ACCENT, width: 2, shape: 'spline' },
+        marker: { color: c.ACCENT, size: 5 },
+        fill: 'tozeroy',
+        fillcolor: c.FILL_ALPHA,
+        hovertemplate: '<b>%{x}</b><br>Avg: ₹%{y:,.0f}/day<extra></extra>',
+      }], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), plotConfig);
+    } else {
+      Plotly.react('chart-cumavg', [], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), plotConfig);
+    }
 
     // Category bar
     const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
