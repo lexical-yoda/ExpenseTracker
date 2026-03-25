@@ -54,6 +54,7 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 - **Advanced filtering** — filter transactions by account, type, category, and date range
 - **CSV export** — download filtered transactions as CSV
 - **Undo delete** — restore accidentally deleted transactions (up to 20 in session)
+- **Email-to-expense pipeline** — paste bank emails or automate via n8n + local LLM parsing
 - **PWA support** — installable on phone home screen, offline caching for static assets
 - Mobile-responsive layout with no theme flash on page load
 - Transactions sorted by date and ID, grouped by day with day-of-week headers
@@ -71,6 +72,7 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 | `/analytics` | Spending trends, category trends, day-of-week patterns, merchant analysis, spending velocity |
 | `/manage` | Add transactions + transaction list with edit/delete/track toggle |
 | `/accounts` | Manage accounts (savings, credit, investment/ETF, fixed deposits) |
+| `/settings` | LLM config, email automation (n8n), webhook, account mapping, custom prompt |
 
 ---
 
@@ -128,6 +130,42 @@ Dashboard shows a net worth card: sum of all savings + investment current values
 
 ---
 
+## Email-to-Expense (LLM parsing)
+
+Automatically parse bank transaction alert emails into expense entries using a local LLM.
+
+### How it works
+
+```
+Bank sends email → Your inbox → n8n detects it → POSTs to app webhook
+→ App strips HTML → sends to local LLM → LLM extracts amount/merchant/date
+→ Draft transaction created → you review on Manage page → accept/edit/reject
+```
+
+### Three ways to use it
+
+| Method | Setup | Best for |
+|--------|-------|----------|
+| **Paste mode** | None — just paste email text on the Manage page | Quick manual entry |
+| **n8n automation** | Install n8n, import workflow template, configure | Hands-free automation |
+| **Webhook API** | `POST /api/drafts/ingest` with API key | Custom integrations |
+
+### Setup
+
+1. Go to **Settings** → enable LLM, enter your LLM endpoint URL (e.g., Ollama, llama.cpp)
+2. Add **account mappings** (e.g., `"account 7621"` → `"HDFC Savings"`)
+3. (Optional) Customize the parsing prompt for your bank — the Settings page has an in-app guide
+4. For automation: install [n8n](https://n8n.io), import the workflow template from Settings, configure your email credentials
+
+The app ships with a default prompt for HDFC Bank (India). For other banks, follow the Prompt Setup Guide on the Settings page — it walks you through using any LLM to generate a parsing prompt for your bank.
+
+### Requirements
+
+- A local LLM with an OpenAI-compatible API (`/v1/chat/completions`) — e.g., llama.cpp, Ollama, LM Studio
+- (For automation) n8n instance with access to your email inbox
+
+---
+
 ## Resetting credentials
 
 ### Password reset script
@@ -171,6 +209,7 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 ```
 ├── app.py              # Flask routes, auth, API endpoints, investment price fetching
 ├── spreadsheet.py      # openpyxl read/write, balance computation, formula sanitization
+├── email_parser.py     # HTML email stripping + LLM parsing for bank transaction emails
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -182,7 +221,9 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 │   ├── auth.json       # Login credentials
 │   ├── accounts.json   # Account definitions (savings, credit, investment)
 │   ├── categories.json # Category definitions
-│   └── expenses.xlsx   # Transaction data
+│   ├── expenses.xlsx   # Transaction data
+│   ├── drafts.json     # Pending email-parsed drafts (auto-created)
+│   └── email_config.json  # LLM + webhook config (auto-created via Settings)
 ├── scripts/
 │   ├── take_screenshots.py  # Automated screenshot generator (selenium + geckodriver)
 │   └── reset_password.py   # CLI password reset tool
@@ -192,6 +233,7 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 │   ├── theme.js        # Theme picker logic + localStorage
 │   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, PWA SW
 │   ├── sw.js           # Service worker (network-first for data, cache-first for static)
+│   ├── n8n-email-workflow.json  # Importable n8n workflow for email automation
 │   ├── favicon.svg     # App favicon
 │   ├── icon-192.png    # PWA icon
 │   └── icon-512.png    # PWA icon
@@ -200,8 +242,9 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
     ├── login.html      # Login page
     ├── dashboard.html  # Plotly charts, stats, investments & net worth (home page)
     ├── analytics.html  # Spending trends, category analysis, merchant breakdown
-    ├── manage.html     # Add transactions + transaction list with sub-expense modal
-    └── accounts.html   # Account management (savings, credit, investment, FD)
+    ├── manage.html     # Add transactions + transaction list + draft review + paste email
+    ├── accounts.html   # Account management (savings, credit, investment, FD)
+    └── settings.html   # LLM config, n8n setup guide, webhook, account mapping, custom prompt
 ```
 
 ---

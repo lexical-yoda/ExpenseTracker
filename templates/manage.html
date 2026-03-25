@@ -126,6 +126,80 @@
     }
     .collapsible-card.collapsed .collapsible-body { display: none; }
 
+    /* ── Drafts ── */
+    .draft-banner {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; margin-bottom: 16px;
+      background: color-mix(in srgb, var(--cc) 15%, var(--surface));
+      border: 1px solid var(--cc); border-radius: var(--radius);
+      cursor: pointer; color: var(--text); font-size: 0.9rem;
+      transition: background 0.2s;
+    }
+    .draft-banner:hover { background: color-mix(in srgb, var(--cc) 25%, var(--surface)); }
+    .draft-banner-icon { font-size: 1.2rem; }
+    .draft-banner-toggle { margin-left: auto; transition: transform 0.2s; }
+    .draft-banner.open .draft-banner-toggle { transform: rotate(180deg); }
+
+    .draft-section { display: none; margin-bottom: 16px; }
+    .draft-section.open { display: block; }
+    .draft-actions-top { display: flex; gap: 8px; margin-bottom: 12px; }
+
+    .draft-card {
+      background: var(--surface); border-radius: var(--radius);
+      padding: 14px 16px; margin-bottom: 8px;
+      border-left: 3px solid var(--cc);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    }
+    .draft-card-info { flex: 1; min-width: 200px; }
+    .draft-card-merchant { font-weight: 600; color: var(--text); font-size: 0.95rem; }
+    .draft-card-meta { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+    .draft-card-amount { font-weight: 700; font-size: 1.1rem; color: var(--cc); min-width: 80px; text-align: right; }
+    .draft-card-actions { display: flex; gap: 6px; }
+    .draft-card-actions button {
+      padding: 6px 12px; border: none; border-radius: 6px;
+      font-size: 0.8rem; cursor: pointer; font-weight: 500;
+    }
+    .draft-btn-accept { background: var(--success); color: #fff; }
+    .draft-btn-edit { background: var(--accent); color: #fff; }
+    .draft-btn-reject { background: var(--danger); color: #fff; }
+    .draft-btn-accept:hover { opacity: 0.85; }
+    .draft-btn-edit:hover { opacity: 0.85; }
+    .draft-btn-reject:hover { opacity: 0.85; }
+
+    .draft-edit-row {
+      width: 100%; display: none; padding-top: 10px;
+      border-top: 1px solid var(--border); margin-top: 8px;
+    }
+    .draft-edit-row.open { display: flex; flex-wrap: wrap; gap: 8px; }
+    .draft-edit-row select, .draft-edit-row input {
+      padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg); color: var(--text); font-size: 0.85rem;
+    }
+    .draft-edit-row input { flex: 1; min-width: 100px; }
+
+    .paste-btn {
+      padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--surface); color: var(--text); cursor: pointer; font-size: 0.85rem;
+    }
+    .paste-btn:hover { background: var(--surface2); }
+
+    .paste-modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      z-index: 1000; justify-content: center; align-items: center;
+    }
+    .paste-modal-overlay.open { display: flex; }
+    .paste-modal {
+      background: var(--surface); border-radius: 12px; padding: 24px;
+      max-width: 500px; width: 90%; max-height: 80vh;
+    }
+    .paste-modal h3 { margin-bottom: 12px; color: var(--text); }
+    .paste-modal textarea {
+      width: 100%; min-height: 150px; padding: 10px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.85rem;
+      resize: vertical; font-family: 'DM Mono', monospace;
+    }
+    .paste-modal-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+
     /* ── Form ── */
     .form-group { margin-bottom: 18px; }
 
@@ -635,6 +709,7 @@
     <a href="/analytics">Analytics</a>
     <a href="/manage" class="active">Manage</a>
     <a href="/accounts">Accounts</a>
+    <a href="/settings">Settings</a>
     <a href="/logout" class="nav-logout">Log Out</a>
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
   </div>
@@ -651,6 +726,24 @@
     <div class="parent-badge-amount">₹{{ "%.2f"|format(parent.amount) }}</div>
   </div>
   {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- DRAFT REVIEW                                                           -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  {% if draft_count > 0 %}
+  <div class="draft-banner" id="draft-banner" onclick="toggleDrafts()">
+    <span class="draft-banner-icon">&#9993;</span>
+    <span id="draft-banner-text">{{ draft_count }} pending transaction{{ 's' if draft_count != 1 }} from email</span>
+    <span class="draft-banner-toggle">&#9660;</span>
+  </div>
+  {% endif %}
+
+  <div class="draft-section" id="draft-section">
+    <div class="draft-actions-top">
+      <button class="draft-btn-accept" onclick="acceptAllDrafts()" style="padding:8px 16px;">Accept All</button>
+    </div>
+    <div id="draft-list"></div>
+  </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <!-- ADD FORM (collapsible)                                                 -->
@@ -789,6 +882,23 @@
     <input type="date" id="filter-from" class="filter-select" title="From date">
     <input type="date" id="filter-to" class="filter-select" title="To date">
     <button class="filter-action-btn" onclick="clearFilters()">Clear</button>
+    {% if llm_enabled %}
+    <button class="paste-btn" onclick="openPasteModal()">&#9993; Paste Email</button>
+    {% endif %}
+  </div>
+
+  <!-- Paste Email Modal -->
+  <div class="paste-modal-overlay" id="paste-modal">
+    <div class="paste-modal">
+      <h3>Paste Bank Email</h3>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:12px;">Paste the full email text or HTML from your bank transaction alert.</p>
+      <textarea id="paste-email-text" placeholder="Paste email content here..."></textarea>
+      <div id="paste-error" style="color:var(--danger); font-size:0.85rem; margin-top:8px; display:none;"></div>
+      <div class="paste-modal-actions">
+        <button class="filter-action-btn" onclick="closePasteModal()">Cancel</button>
+        <button class="draft-btn-accept" id="paste-submit-btn" onclick="submitPasteEmail()">Parse Email</button>
+      </div>
+    </div>
   </div>
 
   {% if not parents %}
@@ -1763,6 +1873,224 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   // showToast is provided by interactions.js
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DRAFTS (Email-to-Expense pipeline)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const categoriesList = {{ categories|tojson }};
+  const accountsList = {{ accounts|tojson }};
+
+  function toggleDrafts() {
+    const banner = document.getElementById('draft-banner');
+    const section = document.getElementById('draft-section');
+    if (!banner || !section) return;
+    banner.classList.toggle('open');
+    section.classList.toggle('open');
+    if (section.classList.contains('open')) loadDrafts();
+  }
+
+  async function loadDrafts() {
+    const list = document.getElementById('draft-list');
+    if (!list) return;
+    try {
+      const resp = await fetch('/api/drafts', { headers: { 'X-CSRFToken': csrfToken } });
+      const drafts = await resp.json();
+      if (!drafts.length) {
+        list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">No pending drafts</div>';
+        const banner = document.getElementById('draft-banner');
+        if (banner) banner.style.display = 'none';
+        return;
+      }
+      list.innerHTML = drafts.map(d => renderDraftCard(d)).join('');
+    } catch (e) {
+      list.innerHTML = '<div style="color:var(--danger);padding:10px;">Failed to load drafts</div>';
+    }
+  }
+
+  function renderDraftCard(d) {
+    const catOptions = Object.keys(categoriesList).map(c =>
+      `<option value="${c}" ${c === d.category ? 'selected' : ''}>${c}</option>`
+    ).join('');
+    const acctOptions = accountsList.map(a =>
+      `<option value="${a.name}" ${a.name === d.account ? 'selected' : ''}>${a.name}</option>`
+    ).join('');
+    return `
+      <div class="draft-card" id="draft-${d.id}">
+        <div class="draft-card-info">
+          <div class="draft-card-merchant">${esc(d.merchant)}</div>
+          <div class="draft-card-meta">${d.date} · ${esc(d.account)} · ${esc(d.category)} · ${d.type}</div>
+        </div>
+        <div class="draft-card-amount">₹${Number(d.amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</div>
+        <div class="draft-card-actions">
+          <button class="draft-btn-accept" onclick="acceptDraft(${d.id})">Accept</button>
+          <button class="draft-btn-edit" onclick="toggleDraftEdit(${d.id})">Edit</button>
+          <button class="draft-btn-reject" onclick="rejectDraft(${d.id})">Reject</button>
+        </div>
+        <div class="draft-edit-row" id="draft-edit-${d.id}">
+          <input type="text" id="de-merchant-${d.id}" value="${esc(d.merchant)}" placeholder="Merchant">
+          <input type="number" id="de-amount-${d.id}" value="${d.amount}" step="0.01" placeholder="Amount">
+          <input type="date" id="de-date-${d.id}" value="${d.date}">
+          <select id="de-account-${d.id}">${acctOptions}</select>
+          <select id="de-category-${d.id}">${catOptions}</select>
+          <select id="de-type-${d.id}">
+            <option value="Expense" ${d.type==='Expense'?'selected':''}>Expense</option>
+            <option value="Income" ${d.type==='Income'?'selected':''}>Income</option>
+            <option value="Transfer" ${d.type==='Transfer'?'selected':''}>Transfer</option>
+          </select>
+          <button class="draft-btn-accept" onclick="saveDraftEdit(${d.id})">Save</button>
+        </div>
+      </div>`;
+  }
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function toggleDraftEdit(id) {
+    const row = document.getElementById(`draft-edit-${id}`);
+    if (row) row.classList.toggle('open');
+  }
+
+  async function acceptDraft(id) {
+    const resp = await fetch(`/api/drafts/${id}/accept`, {
+      method: 'POST', headers: { 'X-CSRFToken': csrfToken }
+    });
+    const data = await resp.json();
+    if (data.success) {
+      document.getElementById(`draft-${id}`)?.remove();
+      showToast('Transaction saved');
+      updateDraftCount(-1);
+    } else {
+      showToast(data.error || 'Failed to accept', 'error');
+    }
+  }
+
+  async function rejectDraft(id) {
+    const resp = await fetch(`/api/drafts/${id}/reject`, {
+      method: 'POST', headers: { 'X-CSRFToken': csrfToken }
+    });
+    const data = await resp.json();
+    if (data.success) {
+      document.getElementById(`draft-${id}`)?.remove();
+      showToast('Draft discarded');
+      updateDraftCount(-1);
+    }
+  }
+
+  async function saveDraftEdit(id) {
+    const body = {
+      merchant: document.getElementById(`de-merchant-${id}`).value,
+      amount: parseFloat(document.getElementById(`de-amount-${id}`).value),
+      date: document.getElementById(`de-date-${id}`).value,
+      account: document.getElementById(`de-account-${id}`).value,
+      category: document.getElementById(`de-category-${id}`).value,
+      type: document.getElementById(`de-type-${id}`).value,
+    };
+    const resp = await fetch(`/api/drafts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    if (data.success) {
+      showToast('Draft updated');
+      loadDrafts();
+    }
+  }
+
+  async function acceptAllDrafts() {
+    const resp = await fetch('/api/drafts/accept-all', {
+      method: 'POST', headers: { 'X-CSRFToken': csrfToken }
+    });
+    const data = await resp.json();
+    if (data.success) {
+      showToast(`${data.count} transactions saved`);
+      document.getElementById('draft-list').innerHTML = '';
+      const banner = document.getElementById('draft-banner');
+      if (banner) banner.style.display = 'none';
+      document.getElementById('draft-section').classList.remove('open');
+    }
+  }
+
+  function updateDraftCount(delta) {
+    const banner = document.getElementById('draft-banner');
+    const text = document.getElementById('draft-banner-text');
+    if (!banner || !text) return;
+    const current = parseInt(text.textContent) || 0;
+    const newCount = Math.max(0, current + delta);
+    if (newCount === 0) {
+      banner.style.display = 'none';
+      document.getElementById('draft-section')?.classList.remove('open');
+    } else {
+      text.textContent = `${newCount} pending transaction${newCount !== 1 ? 's' : ''} from email`;
+    }
+  }
+
+  // ── Paste Email Modal ──
+  function openPasteModal() {
+    document.getElementById('paste-modal').classList.add('open');
+    document.getElementById('paste-email-text').value = '';
+    document.getElementById('paste-error').style.display = 'none';
+  }
+
+  function closePasteModal() {
+    document.getElementById('paste-modal').classList.remove('open');
+  }
+
+  async function submitPasteEmail() {
+    const text = document.getElementById('paste-email-text').value.trim();
+    if (!text) return;
+    const btn = document.getElementById('paste-submit-btn');
+    const errEl = document.getElementById('paste-error');
+    btn.disabled = true;
+    btn.textContent = 'Parsing...';
+    errEl.style.display = 'none';
+
+    try {
+      const resp = await fetch('/api/drafts/paste', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ text })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        closePasteModal();
+        showToast('Email parsed — review below');
+        // Show/update draft banner
+        let banner = document.getElementById('draft-banner');
+        if (!banner) {
+          const container = document.querySelector('.container');
+          const firstChild = container.querySelector('.collapsible-card') || container.firstElementChild;
+          banner = document.createElement('div');
+          banner.className = 'draft-banner';
+          banner.id = 'draft-banner';
+          banner.onclick = toggleDrafts;
+          banner.innerHTML = '<span class="draft-banner-icon">&#9993;</span><span id="draft-banner-text">1 pending transaction from email</span><span class="draft-banner-toggle">&#9660;</span>';
+          container.insertBefore(banner, firstChild);
+        } else {
+          banner.style.display = 'flex';
+          updateDraftCount(1);
+        }
+        // Open draft section and reload
+        banner.classList.add('open');
+        document.getElementById('draft-section').classList.add('open');
+        loadDrafts();
+      } else {
+        errEl.textContent = data.error || 'Parse failed';
+        errEl.style.display = 'block';
+      }
+    } catch (e) {
+      errEl.textContent = 'Request failed. Check your connection.';
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Parse Email';
+    }
+  }
+
+  // Close paste modal on overlay click
+  document.getElementById('paste-modal')?.addEventListener('click', (e) => {
+    if (e.target.classList.contains('paste-modal-overlay')) closePasteModal();
+  });
 
 </script>
 <script src="/static/theme.js"></script>

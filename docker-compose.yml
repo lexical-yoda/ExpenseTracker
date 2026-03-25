@@ -11,3 +11,6 @@ services:
       - PORT=5000
       - SECURE_COOKIES=false
     restart: unless-stopped
+
+# For automatic email ingestion, set up n8n separately.
+# See the Settings page in the app for a full setup guide.

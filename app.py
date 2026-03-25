@@ -7,6 +7,8 @@ from flask_limiter.util import get_remote_address
 import bcrypt
 import json
 import os
+import secrets
+import threading
 import urllib.request
 import urllib.error
 from spreadsheet import (
@@ -80,6 +82,8 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
 ACCOUNTS_FILE = os.path.join(DATA_DIR, 'accounts.json')
 CATEGORIES_FILE = os.path.join(DATA_DIR, 'categories.json')
+DRAFTS_FILE = os.path.join(DATA_DIR, 'drafts.json')
+EMAIL_CONFIG_FILE = os.path.join(DATA_DIR, 'email_config.json')
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -303,6 +307,61 @@ def save_accounts(data):
         json.dump(data, f, indent=2)
 
 
+# ── Draft helpers ────────────────────────────────────────────────────────────
+
+_drafts_lock = threading.Lock()
+
+def load_drafts():
+    if not os.path.exists(DRAFTS_FILE):
+        return []
+    with open(DRAFTS_FILE, 'r') as f:
+        return json.load(f)
+
+def save_drafts(data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    # Prune accepted/rejected drafts older than 30 days
+    cutoff = (datetime.now() - __import__('datetime').timedelta(days=30)).isoformat()
+    data = [d for d in data if d.get('status') == 'pending' or d.get('created_at', '') > cutoff]
+    with open(DRAFTS_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def get_next_draft_id():
+    drafts = load_drafts()
+    if not drafts:
+        return 1
+    return max(d.get('id', 0) for d in drafts) + 1
+
+def draft_fingerprint(amount, date_str, merchant):
+    return f"{amount}|{date_str}|{merchant.lower().strip()}"
+
+
+# ── Email config helpers ─────────────────────────────────────────────────────
+
+def load_email_config():
+    if not os.path.exists(EMAIL_CONFIG_FILE):
+        return None
+    try:
+        with open(EMAIL_CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+def save_email_config(config):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(EMAIL_CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
+def get_default_email_config():
+    return {
+        'enabled': False,
+        'llm_url': '',
+        'system_prompt': '',
+        'account_mapping': {},
+        'api_key': secrets.token_urlsafe(32),
+        'app_url': 'http://localhost:5000'
+    }
+
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
 @app.route('/')
@@ -330,7 +389,10 @@ def manage():
             parent = get_transaction_by_id(int(parent_id))
         except (ValueError, TypeError):
             pass
-    return render_template('manage.html', categories=categories, accounts=accounts, today=today, parent=parent, parents=parents, children=children)
+    draft_count = len([d for d in load_drafts() if d.get('status') == 'pending'])
+    email_config = load_email_config()
+    llm_enabled = bool(email_config and email_config.get('enabled') and email_config.get('llm_url'))
+    return render_template('manage.html', categories=categories, accounts=accounts, today=today, parent=parent, parents=parents, children=children, draft_count=draft_count, llm_enabled=llm_enabled)
 
 
 @app.route('/add')
@@ -884,6 +946,376 @@ def api_undo():
 @login_required
 def api_undo_status():
     return jsonify({'available': len(UNDO_STACK), 'items': [{'action': e['action'], 'description': e['transaction']['description'], 'timestamp': e['timestamp']} for e in reversed(UNDO_STACK)]})
+
+
+# ── API: Drafts (Email-to-Expense pipeline) ─────────────────────────────────
+
+@app.route('/api/drafts/ingest', methods=['POST'])
+@csrf.exempt
+def api_ingest_draft():
+    """Accept raw email HTML from watcher or webhook. CSRF-exempt, API-key auth."""
+    config = load_email_config()
+    if not config or not config.get('enabled'):
+        return jsonify({'success': False, 'error': 'Email integration not enabled'}), 400
+
+    # Validate API key
+    api_key = request.headers.get('X-API-Key', '')
+    if not api_key or api_key != config.get('api_key', ''):
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    data = request.get_json(silent=True) or {}
+    html = data.get('html', '')
+    if not html:
+        return jsonify({'success': False, 'error': 'No HTML content provided'}), 400
+
+    from email_parser import strip_email_html, parse_with_llm, build_default_prompt
+
+    # Strip HTML to get transaction text
+    email_text = strip_email_html(html)
+    if not email_text:
+        return jsonify({'success': True, 'skipped': True, 'reason': 'Non-transaction email'}), 200
+
+    # Build prompt
+    system_prompt = config.get('system_prompt', '').strip()
+    if not system_prompt:
+        system_prompt = build_default_prompt(config.get('account_mapping', {}))
+
+    # Parse with LLM
+    llm_url = config.get('llm_url', '')
+    if not llm_url:
+        return jsonify({'success': False, 'error': 'LLM URL not configured'}), 400
+
+    parsed = parse_with_llm(email_text, llm_url, system_prompt)
+    if not parsed:
+        return jsonify({'success': False, 'error': 'Failed to parse email'}), 422
+
+    # Deduplication check
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    with _drafts_lock:
+        drafts = load_drafts()
+        for d in drafts:
+            if d.get('fingerprint') == fp:
+                return jsonify({'success': True, 'skipped': True, 'reason': 'Duplicate'}), 200
+
+        draft = {
+            'id': get_next_draft_id(),
+            'amount': parsed['amount'],
+            'merchant': parsed['merchant'],
+            'date': parsed['date'],
+            'account': parsed['account'],
+            'category': parsed.get('category', 'Miscellaneous'),
+            'sub_category': '',
+            'type': parsed.get('type', 'Expense'),
+            'status': 'pending',
+            'raw_email_text': email_text[:500],
+            'created_at': datetime.now().isoformat(),
+            'fingerprint': fp
+        }
+        drafts.append(draft)
+        save_drafts(drafts)
+
+    return jsonify({'success': True, 'draft_id': draft['id']})
+
+
+@app.route('/api/drafts/paste', methods=['POST'])
+@login_required
+def api_paste_draft():
+    """Parse pasted email text via LLM and store as draft."""
+    config = load_email_config()
+    if not config or not config.get('enabled') or not config.get('llm_url'):
+        return jsonify({'success': False, 'error': 'LLM not configured. Go to Settings to set up.'}), 400
+
+    data = request.get_json(silent=True) or {}
+    text = data.get('text', '').strip()
+    if not text:
+        return jsonify({'success': False, 'error': 'No text provided'}), 400
+
+    from email_parser import strip_email_html, parse_with_llm, build_default_prompt
+
+    # Try stripping HTML first (user may paste raw HTML)
+    stripped = strip_email_html(text)
+    email_text = stripped if stripped else text
+
+    system_prompt = config.get('system_prompt', '').strip()
+    if not system_prompt:
+        system_prompt = build_default_prompt(config.get('account_mapping', {}))
+
+    parsed = parse_with_llm(email_text, config['llm_url'], system_prompt)
+    if not parsed:
+        return jsonify({'success': False, 'error': 'Could not parse the email text. Check your LLM configuration.'}), 422
+
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    with _drafts_lock:
+        drafts = load_drafts()
+        draft = {
+            'id': get_next_draft_id(),
+            'amount': parsed['amount'],
+            'merchant': parsed['merchant'],
+            'date': parsed['date'],
+            'account': parsed['account'],
+            'category': parsed.get('category', 'Miscellaneous'),
+            'sub_category': '',
+            'type': parsed.get('type', 'Expense'),
+            'status': 'pending',
+            'raw_email_text': email_text[:500],
+            'created_at': datetime.now().isoformat(),
+            'fingerprint': fp
+        }
+        drafts.append(draft)
+        save_drafts(drafts)
+
+    return jsonify({'success': True, 'draft_id': draft['id'], 'draft': draft})
+
+
+@app.route('/api/drafts', methods=['GET'])
+@login_required
+def api_get_drafts():
+    """List pending drafts."""
+    drafts = load_drafts()
+    pending = [d for d in drafts if d.get('status') == 'pending']
+    return jsonify(pending)
+
+
+@app.route('/api/drafts/<int:draft_id>/accept', methods=['POST'])
+@login_required
+def api_accept_draft(draft_id):
+    """Accept a draft and create a real transaction."""
+    with _drafts_lock:
+        drafts = load_drafts()
+        draft = next((d for d in drafts if d['id'] == draft_id and d['status'] == 'pending'), None)
+        if not draft:
+            return jsonify({'success': False, 'error': 'Draft not found or already processed'}), 404
+
+        try:
+            txn_id = add_transaction(
+                date_str=draft['date'],
+                description=draft['merchant'],
+                category=draft.get('category', 'Miscellaneous'),
+                sub_category=draft.get('sub_category', ''),
+                account=draft['account'],
+                amount=draft['amount'],
+                txn_type=draft.get('type', 'Expense')
+            )
+            draft['status'] = 'accepted'
+            save_drafts(drafts)
+            return jsonify({'success': True, 'txn_id': txn_id})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/drafts/<int:draft_id>/reject', methods=['POST'])
+@login_required
+def api_reject_draft(draft_id):
+    """Reject/discard a draft."""
+    with _drafts_lock:
+        drafts = load_drafts()
+        draft = next((d for d in drafts if d['id'] == draft_id and d['status'] == 'pending'), None)
+        if not draft:
+            return jsonify({'success': False, 'error': 'Draft not found'}), 404
+        draft['status'] = 'rejected'
+        save_drafts(drafts)
+    return jsonify({'success': True})
+
+
+@app.route('/api/drafts/<int:draft_id>', methods=['PUT'])
+@login_required
+def api_update_draft(draft_id):
+    """Edit draft fields before accepting."""
+    data = request.get_json(silent=True) or {}
+    with _drafts_lock:
+        drafts = load_drafts()
+        draft = next((d for d in drafts if d['id'] == draft_id and d['status'] == 'pending'), None)
+        if not draft:
+            return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+        for field in ('merchant', 'amount', 'date', 'account', 'category', 'sub_category', 'type'):
+            if field in data:
+                draft[field] = data[field]
+
+        # Update fingerprint if amount/date/merchant changed
+        draft['fingerprint'] = draft_fingerprint(draft['amount'], draft['date'], draft['merchant'])
+        save_drafts(drafts)
+    return jsonify({'success': True, 'draft': draft})
+
+
+@app.route('/api/drafts/accept-all', methods=['POST'])
+@login_required
+def api_accept_all_drafts():
+    """Bulk accept all pending drafts."""
+    with _drafts_lock:
+        drafts = load_drafts()
+        pending = [d for d in drafts if d['status'] == 'pending']
+        if not pending:
+            return jsonify({'success': True, 'count': 0, 'txn_ids': []})
+
+        txn_ids = []
+        for draft in pending:
+            try:
+                txn_id = add_transaction(
+                    date_str=draft['date'],
+                    description=draft['merchant'],
+                    category=draft.get('category', 'Miscellaneous'),
+                    sub_category=draft.get('sub_category', ''),
+                    account=draft['account'],
+                    amount=draft['amount'],
+                    txn_type=draft.get('type', 'Expense')
+                )
+                draft['status'] = 'accepted'
+                txn_ids.append(txn_id)
+            except Exception:
+                pass  # Skip failed ones
+
+        save_drafts(drafts)
+    return jsonify({'success': True, 'count': len(txn_ids), 'txn_ids': txn_ids})
+
+
+# ── Settings page ────────────────────────────────────────────────────────────
+
+@app.route('/settings')
+@login_required
+def settings():
+    config = load_email_config() or get_default_email_config()
+    accounts = load_accounts()
+    categories = load_categories()
+    return render_template('settings.html', config=config, accounts=accounts, categories=categories)
+
+
+@app.route('/download/n8n-workflow')
+@login_required
+def download_n8n_workflow():
+    """Serve the n8n workflow template as a downloadable file."""
+    from flask import send_from_directory
+    return send_from_directory('static', 'n8n-email-workflow.json', as_attachment=True, download_name='n8n-email-workflow.json')
+
+
+@app.route('/api/settings/email', methods=['GET'])
+@login_required
+def api_get_email_config():
+    config = load_email_config() or get_default_email_config()
+    return jsonify(config)
+
+
+@app.route('/api/settings/email', methods=['PUT'])
+@login_required
+def api_update_email_config():
+    data = request.get_json(silent=True) or {}
+    config = load_email_config() or get_default_email_config()
+
+    # Update top-level fields
+    for field in ('enabled', 'llm_url', 'system_prompt', 'account_mapping', 'app_url'):
+        if field in data:
+            config[field] = data[field]
+
+    # Generate API key if missing
+    if not config.get('api_key'):
+        config['api_key'] = secrets.token_urlsafe(32)
+
+    save_email_config(config)
+    return jsonify({'success': True})
+
+
+@app.route('/api/settings/email/regenerate-key', methods=['POST'])
+@login_required
+def api_regenerate_api_key():
+    config = load_email_config() or get_default_email_config()
+    config['api_key'] = secrets.token_urlsafe(32)
+    save_email_config(config)
+    return jsonify({'success': True, 'api_key': config['api_key']})
+
+
+@app.route('/api/settings/email/test-webhook', methods=['POST'])
+@login_required
+def api_test_webhook():
+    """Test the full webhook pipeline: API key → HTML strip → LLM parse → draft creation."""
+    data = request.get_json(silent=True) or {}
+    html = data.get('html', '').strip()
+    if not html:
+        return jsonify({'success': False, 'error': 'Paste a sample bank email to test'}), 400
+
+    config = load_email_config()
+    if not config or not config.get('enabled'):
+        return jsonify({'success': False, 'error': 'Enable LLM parsing in Settings first'}), 400
+    if not config.get('llm_url'):
+        return jsonify({'success': False, 'error': 'Set LLM URL first'}), 400
+    if not config.get('api_key'):
+        return jsonify({'success': False, 'error': 'No API key configured'}), 400
+
+    from email_parser import strip_email_html, parse_with_llm, build_default_prompt
+
+    # Step 1: Strip HTML
+    email_text = strip_email_html(html)
+    if not email_text:
+        return jsonify({'success': False, 'error': 'Could not extract transaction text. This may be a promotional email.'}), 400
+
+    # Step 2: Parse with LLM
+    system_prompt = config.get('system_prompt', '').strip()
+    if not system_prompt:
+        system_prompt = build_default_prompt(config.get('account_mapping', {}))
+
+    parsed = parse_with_llm(email_text, config['llm_url'], system_prompt)
+    if not parsed:
+        return jsonify({'success': False, 'error': 'LLM failed to parse the email. Check your LLM URL and prompt.'}), 422
+
+    # Step 3: Create draft
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    with _drafts_lock:
+        drafts = load_drafts()
+        draft = {
+            'id': get_next_draft_id(),
+            'amount': parsed['amount'],
+            'merchant': parsed['merchant'],
+            'date': parsed['date'],
+            'account': parsed['account'],
+            'category': parsed.get('category', 'Miscellaneous'),
+            'sub_category': '',
+            'type': parsed.get('type', 'Expense'),
+            'status': 'pending',
+            'raw_email_text': email_text[:500],
+            'created_at': datetime.now().isoformat(),
+            'fingerprint': fp
+        }
+        drafts.append(draft)
+        save_drafts(drafts)
+
+    return jsonify({
+        'success': True,
+        'message': 'Full pipeline test passed! Draft created.',
+        'parsed': parsed,
+        'draft_id': draft['id'],
+        'extracted_text': email_text
+    })
+
+
+@app.route('/api/settings/email/test-parse', methods=['POST'])
+@login_required
+def api_test_parse():
+    """Test LLM parsing with sample email text."""
+    data = request.get_json(silent=True) or {}
+    text = data.get('text', '').strip()
+    llm_url = data.get('llm_url', '').strip()
+    system_prompt = data.get('system_prompt', '').strip()
+
+    if not text:
+        return jsonify({'success': False, 'error': 'No text provided'}), 400
+    if not llm_url:
+        return jsonify({'success': False, 'error': 'No LLM URL provided'}), 400
+
+    from email_parser import strip_email_html, parse_with_llm, build_default_prompt
+
+    # Try stripping HTML first
+    stripped = strip_email_html(text)
+    email_text = stripped if stripped else text
+
+    if not system_prompt:
+        config = load_email_config()
+        mapping = config.get('account_mapping', {}) if config else {}
+        system_prompt = build_default_prompt(mapping)
+
+    parsed = parse_with_llm(email_text, llm_url, system_prompt)
+    if parsed:
+        return jsonify({'success': True, 'parsed': parsed, 'extracted_text': email_text})
+    else:
+        return jsonify({'success': False, 'error': 'LLM failed to parse. Check URL and prompt.'}), 422
 
 
 # ── PWA ──────────────────────────────────────────────────────────────────────

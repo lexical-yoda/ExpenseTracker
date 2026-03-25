@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Settings — Expense Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="/static/interactions.js"></script>
+  <link rel="stylesheet" href="/static/themes.css">
+  <script>document.documentElement.setAttribute('data-theme',(localStorage.getItem('em-palette')||'github')+'-'+(localStorage.getItem('em-mode')||'dark'));</script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      padding-bottom: 40px;
+    }
+    nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      background: var(--surface); flex-wrap: wrap; gap: 8px;
+    }
+    .nav-logo { color: var(--accent); text-decoration: none; font-family: var(--font-display); font-weight: 800; font-size: 1.2rem; }
+    .nav-links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.85rem; }
+    .nav-links a:hover, .nav-links a.active { color: var(--accent); }
+    .nav-logout { color: var(--danger) !important; }
+    .container { max-width: 800px; margin: 0 auto; padding: 24px 16px; }
+    .page-title { font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; color: var(--text); margin-bottom: 24px; }
+
+    .section {
+      background: var(--surface); border-radius: 12px; padding: 20px 24px;
+      margin-bottom: 20px; border: 1px solid var(--border);
+    }
+    .section-title {
+      font-family: var(--font-display); font-weight: 600; font-size: 1.1rem;
+      color: var(--text); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+    }
+    .section-desc { font-size: 0.85rem; color: var(--muted); margin-bottom: 16px; }
+
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; font-weight: 500; }
+    .field input, .field select, .field textarea {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg); color: var(--text); font-family: var(--font-mono); font-size: 0.9rem;
+    }
+    .field textarea { min-height: 120px; resize: vertical; font-size: 0.8rem; }
+    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
+
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-label { font-size: 0.9rem; }
+    .toggle-desc { font-size: 0.8rem; color: var(--muted); }
+
+    .toggle-switch {
+      position: relative; width: 44px; height: 24px; cursor: pointer;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0; background: var(--border); border-radius: 24px; transition: 0.2s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px;
+      background: var(--text); border-radius: 50%; transition: 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-slider { background: var(--accent); }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+    .inline-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .inline-row .field { flex: 1; min-width: 150px; }
+
+    .btn {
+      padding: 10px 18px; border: none; border-radius: 8px; font-size: 0.85rem;
+      cursor: pointer; font-weight: 500; font-family: var(--font-mono);
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+    .mapping-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .mapping-table th {
+      text-align: left; font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
+      padding: 6px 8px; border-bottom: 1px solid var(--border);
+    }
+    .mapping-table td { padding: 6px 8px; }
+    .mapping-table input {
+      width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg); color: var(--text); font-size: 0.85rem;
+    }
+    .mapping-table .remove-btn {
+      background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1.1rem;
+    }
+
+    .webhook-url {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; font-size: 0.85rem; color: var(--muted);
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      word-break: break-all;
+    }
+    .webhook-url code { color: var(--text); flex: 1; }
+
+    .collapsible-adv { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+    .collapsible-adv-header {
+      cursor: pointer; font-size: 0.85rem; color: var(--muted);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .collapsible-adv-header:hover { color: var(--text); }
+    .collapsible-adv-body { display: none; margin-top: 12px; }
+    .collapsible-adv.open .collapsible-adv-body { display: block; }
+    .collapsible-adv.open .adv-arrow { transform: rotate(90deg); }
+    .adv-arrow { transition: transform 0.2s; }
+
+    .guide-box {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 16px; margin-top: 12px; font-size: 0.8rem; line-height: 1.6; color: var(--muted);
+    }
+    .guide-box ol { padding-left: 20px; }
+    .guide-box li { margin-bottom: 8px; }
+    .guide-box .meta-prompt {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px; margin: 8px 0; font-style: italic; white-space: pre-wrap;
+    }
+
+    .test-result {
+      margin-top: 12px; padding: 12px; border-radius: 8px;
+      font-size: 0.85rem; display: none;
+    }
+    .test-result.success { display: block; background: color-mix(in srgb, var(--success) 15%, var(--bg)); border: 1px solid var(--success); }
+    .test-result.error { display: block; background: color-mix(in srgb, var(--danger) 15%, var(--bg)); border: 1px solid var(--danger); }
+
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .status-dot.on { background: var(--success); }
+    .status-dot.off { background: var(--danger); }
+
+    @media (max-width: 600px) {
+      .container { padding: 16px 12px; }
+      .section { padding: 16px; }
+      .inline-row { flex-direction: column; }
+      .inline-row .field { min-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">Expense Manager</a>
+  <div class="nav-links">
+    <a href="/">Dashboard</a>
+    <a href="/analytics">Analytics</a>
+    <a href="/manage">Manage</a>
+    <a href="/accounts">Accounts</a>
+    <a href="/settings" class="active">Settings</a>
+    <a href="/logout" class="nav-logout">Log Out</a>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-title">Settings</div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- LLM CONFIGURATION                                                      -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">
+      <span class="status-dot {{ 'on' if config.enabled and config.llm_url else 'off' }}"></span>
+      LLM Configuration
+    </div>
+    <div class="section-desc">Connect a local LLM to automatically parse bank transaction emails into expense entries.</div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Enable LLM Parsing</div>
+        <div class="toggle-desc">Required for paste mode and email automation</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="cfg-enabled" {{ 'checked' if config.enabled }}>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="field" style="margin-top:16px;">
+      <label>LLM Endpoint URL</label>
+      <input type="url" id="cfg-llm-url" value="{{ config.llm_url or '' }}" placeholder="http://192.168.1.31:8080">
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+      <button class="btn btn-outline" onclick="testLLM()">Test LLM Connection</button>
+    </div>
+    <div class="test-result" id="llm-test-result"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- EMAIL AUTOMATION (n8n)                                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Email Automation (n8n)</div>
+    <div class="section-desc">Automatically parse bank transaction emails using <strong>n8n</strong> — a free, self-hosted automation tool that connects your email inbox to this app.</div>
+
+    <div class="guide-box">
+      <p><strong>How it works:</strong></p>
+      <p style="margin-top:8px;">Bank sends email → Your inbox → n8n detects it → n8n sends it to this app → LLM parses it → Draft appears for review</p>
+    </div>
+
+    <div class="collapsible-adv open" id="n8n-guide" style="border-top:none; margin-top:16px; padding-top:0;">
+      <div class="collapsible-adv-header" onclick="this.parentElement.classList.toggle('open')">
+        <span class="adv-arrow">&#9654;</span> <strong>Setup Guide</strong>
+      </div>
+      <div class="collapsible-adv-body">
+        <div class="guide-box">
+          <ol>
+            <li>
+              <strong>Install n8n</strong><br>
+              <p style="margin:4px 0;">Option A — Quick start:</p>
+              <div class="meta-prompt" style="font-style:normal;">docker run -d --name n8n -p 5678:5678 -v n8n_data:/home/node/.n8n n8nio/n8n</div>
+              <p style="margin:4px 0;">Option B — Docker Compose (recommended):</p>
+              <div class="meta-prompt" style="font-style:normal;">services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      - N8N_SECURE_COOKIE=false
+    restart: unless-stopped
+
+volumes:
+  n8n_data:</div>
+              <p style="margin:4px 0;">Then open <code>http://localhost:5678</code> and create an account.</p>
+            </li>
+            <li>
+              <strong>Download the workflow template</strong><br>
+              <a href="/download/n8n-workflow" class="btn btn-outline" style="display:inline-block; margin:8px 0; font-size:0.8rem; padding:6px 12px;">Download n8n Workflow Template</a>
+            </li>
+            <li>
+              <strong>Import into n8n</strong><br>
+              In n8n: click <strong>+ Add Workflow</strong> → <strong>Import from File</strong> → select the downloaded JSON file.
+            </li>
+            <li>
+              <strong>Configure Node 1: Email Trigger</strong><br>
+              Click the "Email Trigger (IMAP)" node → Add credentials:
+              <table style="margin:8px 0; font-size:0.8rem; border-collapse:collapse;">
+                <tr><td style="padding:4px 12px 4px 0; color:var(--text);"><strong>Gmail</strong></td><td style="padding:4px 0;">imap.gmail.com : 993 (SSL) + App Password</td></tr>
+                <tr><td style="padding:4px 12px 4px 0; color:var(--text);"><strong>Outlook</strong></td><td style="padding:4px 0;">outlook.office365.com : 993 (SSL) + App Password</td></tr>
+                <tr><td style="padding:4px 12px 4px 0; color:var(--text);"><strong>Yahoo</strong></td><td style="padding:4px 0;">imap.mail.yahoo.com : 993 (SSL) + App Password</td></tr>
+                <tr><td style="padding:4px 12px 4px 0; color:var(--text);"><strong>Protonmail</strong></td><td style="padding:4px 0;">127.0.0.1 : 1143 (STARTTLS) via Protonmail Bridge</td></tr>
+              </table>
+            </li>
+            <li>
+              <strong>Configure Node 2: Filter Bank Emails</strong><br>
+              Replace <code>REPLACE_WITH_BANK_SENDER_EMAIL</code> with your bank's alert email address (e.g., <code>alerts@hdfcbank.net</code>).
+            </li>
+            <li>
+              <strong>Configure Node 3: Send to Expense Manager</strong><br>
+              Replace these values (copy from the Webhook section below):
+              <ul style="margin-top:4px;">
+                <li><code>REPLACE_WITH_APP_URL</code> → your app URL (e.g., <code>https://expenses.yourdomain.com</code>)</li>
+                <li><code>REPLACE_WITH_API_KEY</code> → your API key</li>
+              </ul>
+            </li>
+            <li>
+              <strong>Activate the workflow</strong><br>
+              Toggle the switch in the top-right of the n8n workflow editor. Done!
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ACCOUNT MAPPING                                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Account Mapping</div>
+    <div class="section-desc">Map identifiers in your bank emails to your Expense Manager accounts.</div>
+
+    <table class="mapping-table" id="mapping-table">
+      <thead>
+        <tr>
+          <th>Email Identifier</th>
+          <th>Maps To Account</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="mapping-body">
+        {% if config.account_mapping %}
+        {% for key, val in config.account_mapping.items() %}
+        <tr>
+          <td><input type="text" class="mapping-key" value="{{ key }}" placeholder='e.g., "account 7621"'></td>
+          <td>
+            <select class="mapping-val">
+              {% for acct in accounts %}
+              <option value="{{ acct.name }}" {{ 'selected' if acct.name == val }}>{{ acct.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><button class="remove-btn" onclick="this.closest('tr').remove()">×</button></td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+    <button class="btn btn-outline" style="margin-top:8px;" onclick="addMappingRow()">+ Add Mapping</button>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- WEBHOOK                                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Webhook</div>
+    <div class="section-desc">Send bank alert emails to this endpoint from external tools (n8n, Mailrise, scripts).</div>
+
+    <div class="field">
+      <label>Ingest URL</label>
+      <div class="webhook-url">
+        <code id="webhook-url">POST {{ config.app_url or 'http://localhost:5000' }}/api/drafts/ingest</code>
+        <button class="btn btn-outline" style="padding:4px 10px; font-size:0.75rem;" onclick="copyWebhook()">Copy</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>API Key</label>
+      <div class="webhook-url">
+        <code id="api-key-display">{{ config.api_key or 'Not generated' }}</code>
+        <button class="btn btn-outline" style="padding:4px 10px; font-size:0.75rem;" onclick="regenerateKey()">Regenerate</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>App URL</label>
+      <input type="url" id="cfg-app-url" value="{{ config.app_url or 'http://localhost:5000' }}" placeholder="http://localhost:5000">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+    </div>
+
+    <!-- Test Webhook (full pipeline test) -->
+    <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+      <div class="field">
+        <label>Test Full Pipeline — paste a sample bank email</label>
+        <textarea id="test-webhook-input" style="min-height:80px;" placeholder="Paste a bank email here to test the full pipeline: API key → HTML parsing → LLM → draft creation..."></textarea>
+      </div>
+      <button class="btn btn-success" onclick="testWebhook()">Test Webhook Pipeline</button>
+      <div class="test-result" id="webhook-test-result"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- CUSTOM PROMPT (Advanced)                                                -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Custom Parsing Prompt</div>
+    <div class="section-desc">Customize the system prompt sent to the LLM for parsing bank emails.</div>
+
+    <div class="field">
+      <label>System Prompt <span style="font-size:0.7rem; color:var(--muted); text-transform:none;">(leave blank for default)</span></label>
+      <textarea id="cfg-prompt" placeholder="Leave empty to use the default prompt with your account mapping...">{{ config.system_prompt or '' }}</textarea>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+      <button class="btn btn-outline" onclick="document.getElementById('cfg-prompt').value=''; showToast('Reset to default');">Reset to Default</button>
+    </div>
+
+    <!-- Prompt Setup Guide -->
+    <div class="collapsible-adv" id="prompt-guide">
+      <div class="collapsible-adv-header" onclick="this.parentElement.classList.toggle('open')">
+        <span class="adv-arrow">&#9654;</span> Prompt Setup Guide — create a prompt for your bank
+      </div>
+      <div class="collapsible-adv-body">
+        <div class="guide-box">
+          <p><strong>How to create a parsing prompt for your bank:</strong></p>
+          <ol>
+            <li>Copy 3-4 different transaction alert emails from your bank (include: debit, credit, UPI, card transactions)</li>
+            <li>Open any capable LLM (ChatGPT, Claude, Gemini, etc.)</li>
+            <li>Paste this prompt along with your sample emails:
+              <div class="meta-prompt" id="meta-prompt-text">I have a self-hosted expense tracker that parses bank transaction emails using an LLM. I need you to create a system prompt that extracts transaction details from my bank's email alerts.
+
+Here are sample emails from my bank:
+[paste your emails here]
+
+The output must be a JSON object with exactly these fields:
+- amount (number, always positive)
+- merchant (string, clean merchant name)
+- date (string in YYYY-MM-DD format)
+- account (string, must match one of my account names listed below)
+- category (string, best guess from: Groceries, Dining, Transport, Utilities, Shopping, Health, Entertainment, Education, Miscellaneous)
+- type (string, either "Expense" or "Income")
+
+My accounts are:
+[list your account names here]
+
+Create a system prompt with explicit rules for:
+- Parsing my bank's specific date formats
+- Extracting merchant names (removing bank-specific prefixes)
+- Mapping account identifiers to my account names
+- Handling the current year correctly
+
+The prompt should instruct the LLM to return ONLY a JSON object, no explanation or markdown.</div>
+              <button class="btn btn-outline" style="font-size:0.75rem; padding:4px 10px;" onclick="navigator.clipboard.writeText(document.getElementById('meta-prompt-text').textContent); showToast('Copied!');">Copy Meta-Prompt</button>
+            </li>
+            <li>Copy the generated system prompt into the text area above</li>
+            <li>Use "Test Parse" below to verify it works</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <!-- Test Parse -->
+    <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+      <div class="field">
+        <label>Test Parse — paste a sample email</label>
+        <textarea id="test-parse-input" style="min-height:80px;" placeholder="Paste a bank email here to test parsing..."></textarea>
+      </div>
+      <button class="btn btn-success" onclick="testParse()">Test Parse</button>
+      <div class="test-result" id="parse-test-result"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  const accountNames = {{ accounts|tojson }};
+
+  function getAccountMapping() {
+    const mapping = {};
+    document.querySelectorAll('#mapping-body tr').forEach(row => {
+      const key = row.querySelector('.mapping-key')?.value?.trim();
+      const val = row.querySelector('.mapping-val')?.value;
+      if (key && val) mapping[key] = val;
+    });
+    return mapping;
+  }
+
+  function addMappingRow() {
+    const tbody = document.getElementById('mapping-body');
+    const acctOptions = accountNames.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" class="mapping-key" placeholder='e.g., "account 1234"'></td>
+      <td><select class="mapping-val">${acctOptions}</select></td>
+      <td><button class="remove-btn" onclick="this.closest('tr').remove()">×</button></td>`;
+    tbody.appendChild(tr);
+  }
+
+  async function saveConfig() {
+    const activePreset = document.querySelector('.preset-chip.active')?.dataset?.preset || 'custom';
+    const body = {
+      enabled: document.getElementById('cfg-enabled').checked,
+      llm_url: document.getElementById('cfg-llm-url').value.trim(),
+      system_prompt: document.getElementById('cfg-prompt').value.trim(),
+      account_mapping: getAccountMapping(),
+      app_url: document.getElementById('cfg-app-url').value.trim(),
+    };
+
+    const resp = await fetch('/api/settings/email', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    if (data.success) showToast('Settings saved');
+    else showToast(data.error || 'Failed to save', 'error');
+  }
+
+  async function testLLM() {
+    const url = document.getElementById('cfg-llm-url').value.trim();
+    const el = document.getElementById('llm-test-result');
+    if (!url) { el.className = 'test-result error'; el.textContent = 'Enter a URL first'; return; }
+    el.className = 'test-result'; el.style.display = 'block'; el.textContent = 'Testing...';
+    try {
+      const resp = await fetch(url.replace(/\/$/, '') + '/v1/models');
+      const data = await resp.json();
+      const models = (data.models || data.data || []).map(m => m.id || m.name).join(', ');
+      el.className = 'test-result success';
+      el.textContent = 'Connected! Models: ' + (models || 'unknown');
+    } catch (e) {
+      el.className = 'test-result error';
+      el.textContent = 'Failed to connect: ' + e.message;
+    }
+  }
+
+  async function testWebhook() {
+    const html = document.getElementById('test-webhook-input').value.trim();
+    const el = document.getElementById('webhook-test-result');
+    if (!html) { el.className = 'test-result error'; el.textContent = 'Paste a bank email first'; return; }
+    el.className = 'test-result'; el.style.display = 'block'; el.textContent = 'Testing full pipeline...';
+
+    const resp = await fetch('/api/settings/email/test-webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ html })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      el.className = 'test-result success';
+      el.innerHTML = '<strong>' + data.message + '</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + JSON.stringify(data.parsed, null, 2) + '</pre><br><span style="font-size:0.8rem;color:var(--muted);">Draft #' + data.draft_id + ' created. Check the Manage page to review it.</span>';
+    } else {
+      el.className = 'test-result error';
+      el.textContent = data.error;
+    }
+  }
+
+  async function testParse() {
+    const text = document.getElementById('test-parse-input').value.trim();
+    const el = document.getElementById('parse-test-result');
+    if (!text) { el.className = 'test-result error'; el.textContent = 'Paste an email first'; return; }
+    el.className = 'test-result'; el.style.display = 'block'; el.textContent = 'Parsing...';
+
+    const resp = await fetch('/api/settings/email/test-parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({
+        text,
+        llm_url: document.getElementById('cfg-llm-url').value.trim(),
+        system_prompt: document.getElementById('cfg-prompt').value.trim(),
+      })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      el.className = 'test-result success';
+      el.innerHTML = '<strong>Parsed successfully:</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + JSON.stringify(data.parsed, null, 2) + '</pre>';
+    } else {
+      el.className = 'test-result error';
+      el.textContent = data.error;
+    }
+  }
+
+  async function regenerateKey() {
+    const resp = await fetch('/api/settings/email/regenerate-key', {
+      method: 'POST', headers: { 'X-CSRFToken': csrfToken }
+    });
+    const data = await resp.json();
+    if (data.success) {
+      document.getElementById('api-key-display').textContent = data.api_key;
+      showToast('API key regenerated');
+    }
+  }
+
+  function copyWebhook() {
+    const text = document.getElementById('webhook-url').textContent;
+    navigator.clipboard.writeText(text);
+    showToast('Copied!');
+  }
+</script>
+<script src="/static/theme.js"></script>
+<script>
+  initThemePicker();
+</script>
+</body>
+</html>

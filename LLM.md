@@ -26,20 +26,23 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 ### File Structure
 
 ```
-├── app.py              # Flask routes, auth, API endpoints, CSRF
+├── app.py              # Flask routes, auth, API endpoints, CSRF, draft/email/settings APIs
 ├── spreadsheet.py      # openpyxl read/write, balance computation, formula sanitization
+├── email_parser.py     # HTML email stripping + LLM parsing (no Flask deps, testable standalone)
 ├── requirements.txt    # Python dependencies
-├── Dockerfile          # Multi-stage build, gunicorn server
+├── Dockerfile          # Python 3.10-slim, gunicorn server
 ├── docker-compose.yml  # Single-service compose for deployment
 ├── .env                # Server config only (host, port, secret key — auto-generated)
 ├── .github/
 │   └── workflows/
 │       └── docker.yml  # GitHub Actions — auto-build and push image to ghcr.io on push to main
 ├── data/               # All user data (back up this folder to migrate)
-│   ├── auth.json       # Login credentials (username + bcrypt hash, chmod 600)
+│   ├── auth.json       # Login credentials (username + bcrypt hash)
 │   ├── accounts.json   # Account definitions
 │   ├── categories.json # Category/sub-category definitions
-│   └── expenses.xlsx   # Transaction data (one sheet per month)
+│   ├── expenses.xlsx   # Transaction data (one sheet per month)
+│   ├── drafts.json     # Pending email-parsed draft transactions (auto-created)
+│   └── email_config.json  # LLM + webhook config (auto-created via Settings page)
 ├── scripts/
 │   ├── take_screenshots.py  # Selenium-based screenshot generator for README
 │   └── reset_password.py   # CLI password reset (interactive or -p flag)
@@ -49,6 +52,7 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 │   ├── theme.js        # Theme picker logic, palette/mode switching, localStorage
 │   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, relative timestamps, PWA SW registration
 │   ├── sw.js           # Service worker (network-first for data, cache-first for static)
+│   ├── n8n-email-workflow.json  # Importable n8n workflow template for email automation
 │   ├── favicon.svg     # App favicon (SVG)
 │   ├── icon-192.png    # PWA icon (192x192)
 │   └── icon-512.png    # PWA icon (512x512)
@@ -57,8 +61,9 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
     ├── login.html      # Login page
     ├── dashboard.html  # Plotly charts, stats, account balances, investments (home page)
     ├── analytics.html  # Spending trends, category trends, merchant analysis, velocity
-    ├── manage.html     # Combined add form + transaction list with edit/delete
-    └── accounts.html   # Account management (CRUD)
+    ├── manage.html     # Add form + transaction list + draft review banner + paste email modal
+    ├── accounts.html   # Account management (CRUD)
+    └── settings.html   # LLM config, n8n setup guide, webhook, account mapping, custom prompt
 ```
 
 ---
@@ -505,6 +510,107 @@ gunicorn>=21.2.0
 ### Modifying the color palette
 
 All theme colors are in `static/themes.css`. Dashboard chart colors are derived from CSS variables via `getThemeColors()` — no hardcoded chart colors to update.
+
+---
+
+## Email-to-Expense Pipeline
+
+### Architecture
+
+```
+Bank email → User inbox → n8n (or paste) → App webhook/paste API
+    → email_parser.strip_email_html() → extracts transaction text
+    → email_parser.parse_with_llm() → sends to local LLM → gets JSON
+    → Draft stored in data/drafts.json (status: pending)
+    → User reviews on Manage page → accept/edit/reject
+    → Accepted → add_transaction() → real transaction in xlsx
+```
+
+### Key files
+
+- **`email_parser.py`** — two pure functions, no Flask dependencies:
+  - `strip_email_html(html)` → extracts "Dear Customer..." text, returns None for promotional emails
+  - `parse_with_llm(text, llm_url, prompt)` → calls LLM's `/v1/chat/completions`, validates response, returns dict
+  - `build_default_prompt(account_mapping)` → generates system prompt with dynamic account mapping and current year
+  - `PROMPT_SETUP_GUIDE` — meta-prompt for users to create custom bank prompts using any LLM
+
+- **Draft endpoints in `app.py`**:
+  - `POST /api/drafts/ingest` — CSRF-exempt, API-key auth via `X-API-Key` header. Used by n8n/webhook.
+  - `POST /api/drafts/paste` — login + CSRF auth. Used by paste modal on Manage page.
+  - `GET /api/drafts` — list pending drafts
+  - `POST /api/drafts/<id>/accept` — creates real transaction via `add_transaction()`
+  - `POST /api/drafts/<id>/reject` — marks draft as rejected
+  - `PUT /api/drafts/<id>` — edit draft fields before accepting
+  - `POST /api/drafts/accept-all` — bulk accept all pending
+
+- **Settings endpoints in `app.py`**:
+  - `GET/PUT /api/settings/email` — read/update email config
+  - `POST /api/settings/email/regenerate-key` — regenerate API key
+  - `POST /api/settings/email/test-webhook` — full pipeline test (HTML strip → LLM → draft creation)
+  - `POST /api/settings/email/test-parse` — test LLM parsing with custom prompt
+
+### Draft storage (`data/drafts.json`)
+
+```json
+[
+  {
+    "id": 1,
+    "amount": 450.00,
+    "merchant": "Swiggy",
+    "date": "2026-03-25",
+    "account": "HDFC Regalia Credit Card",
+    "category": "Dining",
+    "sub_category": "",
+    "type": "Expense",
+    "status": "pending",
+    "raw_email_text": "Dear Customer, Rs.450...",
+    "created_at": "2026-03-25T14:30:00",
+    "fingerprint": "450.0|2026-03-25|swiggy"
+  }
+]
+```
+
+- `fingerprint` = `amount|date|merchant_lowercase` — used for deduplication
+- `status`: `pending` / `accepted` / `rejected`
+- Accepted/rejected drafts older than 30 days are auto-pruned on save
+- Thread-safe via `_drafts_lock` in app.py
+
+### Email config (`data/email_config.json`)
+
+```json
+{
+  "enabled": true,
+  "llm_url": "http://192.168.1.31:8080",
+  "system_prompt": "",
+  "account_mapping": {
+    "account 7621": "HDFC Savings",
+    "Credit Card ending 0230": "HDFC Regalia Credit Card"
+  },
+  "api_key": "auto-generated-token",
+  "app_url": "http://localhost:5000"
+}
+```
+
+- `system_prompt`: empty = use default prompt from `build_default_prompt()`
+- `api_key`: validates `X-API-Key` header on the ingest endpoint
+- Config is created/managed via the Settings page UI
+
+### n8n integration
+
+The app ships with an importable n8n workflow template at `static/n8n-email-workflow.json`. Three nodes:
+1. **Email Trigger (IMAP)** — polls inbox for new emails
+2. **Filter** — matches bank sender address
+3. **HTTP Request** — POSTs email HTML to `/api/drafts/ingest` with API key
+
+Users configure their email credentials in n8n, not in the app. The app only needs the LLM URL and API key.
+
+### Security notes
+
+- The ingest endpoint is CSRF-exempt (called by external tools) but requires a valid API key
+- The API key is generated with `secrets.token_urlsafe(32)` and stored in `email_config.json`
+- LLM calls happen server-side via `urllib.request` — the LLM URL can be a private/local address
+- Email text is truncated to 500 chars before storing in drafts (prevents large payloads)
+- Draft content is escaped in the frontend via `textContent` assignment (XSS-safe)
 
 ---
 

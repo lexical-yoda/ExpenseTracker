@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN adduser --disabled-password --gecos '' appuser
 RUN mkdir -p /app/data && chown appuser:appuser /app/data
 
-COPY app.py spreadsheet.py ./
+COPY app.py spreadsheet.py email_parser.py ./
 COPY templates/ templates/
 COPY static/ static/
 COPY scripts/ scripts/
