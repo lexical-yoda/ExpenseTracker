@@ -1223,6 +1223,29 @@ def api_regenerate_api_key():
     return jsonify({'success': True, 'api_key': config['api_key']})
 
 
+@app.route('/api/settings/email/test-llm', methods=['POST'])
+@login_required
+def api_test_llm():
+    """Test LLM connection server-side."""
+    data = request.get_json(silent=True) or {}
+    llm_url = data.get('llm_url', '').strip()
+    if not llm_url:
+        return jsonify({'success': False, 'error': 'Enter a URL first'}), 400
+
+    url = llm_url.rstrip('/') + '/v1/models'
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            models = result.get('models', result.get('data', []))
+            model_names = ', '.join(m.get('id', m.get('name', '')) for m in models) or 'unknown'
+            return jsonify({'success': True, 'message': f'Connected! Models: {model_names}'})
+    except urllib.error.URLError as e:
+        return jsonify({'success': False, 'error': f'Connection failed: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Error: {str(e)}'}), 400
+
+
 @app.route('/api/settings/email/test-webhook', methods=['POST'])
 @login_required
 def api_test_webhook():

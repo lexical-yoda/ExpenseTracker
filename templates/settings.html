@@ -491,14 +491,17 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     if (!url) { el.className = 'test-result error'; el.textContent = 'Enter a URL first'; return; }
     el.className = 'test-result'; el.style.display = 'block'; el.textContent = 'Testing...';
     try {
-      const resp = await fetch(url.replace(/\/$/, '') + '/v1/models');
+      const resp = await fetch('/api/settings/email/test-llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ llm_url: url })
+      });
       const data = await resp.json();
-      const models = (data.models || data.data || []).map(m => m.id || m.name).join(', ');
-      el.className = 'test-result success';
-      el.textContent = 'Connected! Models: ' + (models || 'unknown');
+      el.className = data.success ? 'test-result success' : 'test-result error';
+      el.textContent = data.message || data.error;
     } catch (e) {
       el.className = 'test-result error';
-      el.textContent = 'Failed to connect: ' + e.message;
+      el.textContent = 'Failed: ' + e.message;
     }
   }
 
