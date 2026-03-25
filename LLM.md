@@ -350,7 +350,7 @@ All templates are standalone HTML files (no base template / inheritance). Each i
 
 Two-column chart grid on desktop (> 900px), single column on mobile. Container max-width 1400px.
 
-**Stat cards** (6): Total Spent, Total Income, Net (green/red), Transactions count, Avg/Day, Top Category
+**Stat cards** (6): Total Spent, Total Income, Net (green/red), Transactions count, Avg/Day, Spent Today
 
 **Account balance cards**: One card per account showing name, type, current balance or remaining credit
 
@@ -546,8 +546,10 @@ Bank email → User inbox → n8n (or paste) → App webhook/paste API
 - **Settings endpoints in `app.py`**:
   - `GET/PUT /api/settings/email` — read/update email config
   - `POST /api/settings/email/regenerate-key` — regenerate API key
+  - `POST /api/settings/email/test-llm` — test LLM connection (server-side, returns model names)
   - `POST /api/settings/email/test-webhook` — full pipeline test (HTML strip → LLM → draft creation)
   - `POST /api/settings/email/test-parse` — test LLM parsing with custom prompt
+  - `PUT /api/settings/nw-goal` — update net worth goal increment
 
 ### Draft storage (`data/drafts.json`)
 
@@ -614,13 +616,62 @@ Users configure their email credentials in n8n, not in the app. The app only nee
 
 ---
 
+## Credit Card Billing Cycle
+
+Credit card accounts can have a `billing_date` field (day of month, e.g., 14). When set, the dashboard shows:
+
+- **Current Cycle Spend** — CC expenses from billing date to today
+- **Cycle Period** — e.g., "14/3 — 13/4"
+- **Days Remaining** — countdown to cycle end
+- **Projected Bill** — daily average × total cycle days
+- **Total CC Outstanding** — all-time accumulated CC balance
+- **Previous Cycle Bill** — last cycle's total CC spend
+- **Previous Period** — date range of prior cycle
+- **Cycle-over-Cycle** — comparison showing spending up/down vs previous cycle (with % change)
+
+All calculated client-side in `renderBillingCycle()` in `dashboard.html`. Only shown when at least one CC account has `billing_date` configured.
+
+---
+
+## Net Worth Goal
+
+Users set a net worth milestone increment during setup (default ₹5,00,000). The dashboard shows:
+- Current net worth (savings + investments - CC debt)
+- Next milestone (auto-advances when crossed)
+- Progress bar with percentage
+- Remaining amount
+
+Stored in `data/auth.json` as `nw_goal_increment`. Updated via `PUT /api/settings/nw-goal`. Milestone computed client-side in `computeMilestone()`.
+
+---
+
+## Logging
+
+The app uses Flask's `app.logger` for structured logging. In Docker, all logs appear in `docker logs expense-manager`.
+
+**Logged events:**
+
+| Event | Level | Details |
+|-------|-------|---------|
+| Login success/failure | INFO/WARNING | Username + IP address |
+| Transaction CRUD | INFO/ERROR | ID, description, amount, account |
+| Draft ingest | INFO | Source IP, email size, LLM parse result |
+| Draft accept/reject | INFO | Draft ID, merchant, amount |
+| LLM parse failure | ERROR | Email text preview |
+| Invalid API key | WARNING | Source IP |
+| Yahoo Finance failure | WARNING | Ticker + error |
+| Settings changes | INFO | Enabled status, LLM URL |
+| Bulk accept failures | WARNING | Draft ID + error |
+
+---
+
 ## Known Limitations
 
 - **Single user only** — no multi-user support, no user management
 - **Thread-safe but not multi-process safe** — thread locks protect concurrent writes within a single process (gunicorn -w 1). Running multiple workers would require file-level locking
 - **No pagination** — all transactions are loaded at once. Will slow down with thousands of entries
 - **Dashboard recomputes on every load** — `compute_account_balances()` reads all transactions every time
-- **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 5 files. Theme CSS/JS is shared via static files.
+- **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 7 files (setup, login, dashboard, analytics, manage, accounts, settings). Theme CSS/JS is shared via static files.
 - **Cross-month date edits blocked** — must delete and re-add to move a transaction between months
 - **Yahoo Finance dependency** — investment prices rely on an unofficial API that could break. Failures are handled gracefully (shows "Price unavailable")
 - **No investment transaction history** — unit updates are immediate; there's no log of past unit changes separate from the transaction list

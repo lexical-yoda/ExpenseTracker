@@ -16,7 +16,7 @@ from spreadsheet import (
     get_monthly_summary, update_transaction, delete_transaction,
     rename_account_in_sheets, compute_account_balances
 )
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 load_dotenv()
 
@@ -118,7 +118,7 @@ def save_auth(username, password_hash, extra=None):
 
 
 def get_nw_goal():
-    """Get net worth goal config. Returns (increment, current_milestone)."""
+    """Get net worth goal increment. Returns (increment, increment). Milestone is computed client-side."""
     auth = load_auth()
     if not auth:
         return 500000, 500000
@@ -180,12 +180,14 @@ def login():
         if (auth and username == auth['username'] and
                 bcrypt.checkpw(password.encode('utf-8'), auth['password_hash'].encode('utf-8'))):
             login_user(User(username), remember=True)
+            app.logger.info("Login success: %s from %s", username, request.remote_addr)
             next_page = request.args.get('next', '')
             # Only allow relative paths to prevent open redirect attacks
-            if not next_page or not next_page.startswith('/') or next_page.startswith('//'):
+            if not next_page or not next_page.startswith('/') or next_page.startswith('//') or '\\' in next_page or ':' in next_page:
                 next_page = url_for('dashboard')
             return redirect(next_page)
         else:
+            app.logger.warning("Login failed: user=%s from %s", username, request.remote_addr)
             error = 'Invalid username or password'
 
     return render_template('login.html', error=error)
@@ -320,7 +322,7 @@ def load_drafts():
 def save_drafts(data):
     os.makedirs(DATA_DIR, exist_ok=True)
     # Prune accepted/rejected drafts older than 30 days
-    cutoff = (datetime.now() - __import__('datetime').timedelta(days=30)).isoformat()
+    cutoff = (datetime.now() - timedelta(days=30)).isoformat()
     data = [d for d in data if d.get('status') == 'pending' or d.get('created_at', '') > cutoff]
     with open(DRAFTS_FILE, 'w') as f:
         json.dump(data, f, indent=2)
@@ -461,8 +463,10 @@ def api_add_transaction():
             track=data.get('track', True),
             units=units
         )
+        app.logger.info("Transaction created: id=%s desc='%s' amount=%.2f account='%s' type=%s", txn_id, data['description'], float(data['amount']), data['account'], txn_type)
         return jsonify({'success': True, 'id': txn_id})
     except Exception as e:
+        app.logger.error("Transaction create failed: %s | data=%s", e, {k: v for k, v in data.items() if k != 'csrf_token'})
         return jsonify({'success': False, 'error': 'Operation failed'}), 400
 
 
@@ -490,8 +494,10 @@ def api_update_transaction(txn_id):
         return jsonify({'success': False, 'error': 'Type must be Expense, Income, or Transfer'}), 400
     try:
         updated = update_transaction(txn_id, data)
+        app.logger.info("Transaction updated: id=%s", txn_id)
         return jsonify({'success': True, 'transaction': updated})
     except ValueError as e:
+        app.logger.error("Transaction update failed: id=%s error=%s", txn_id, e)
         return jsonify({'success': False, 'error': 'Operation failed'}), 400
 
 
@@ -500,8 +506,10 @@ def api_update_transaction(txn_id):
 def api_delete_transaction(txn_id):
     try:
         deleted_ids = delete_transaction(txn_id)
+        app.logger.info("Transaction deleted: id=%s (cascade: %s)", txn_id, deleted_ids)
         return jsonify({'success': True, 'deleted_ids': deleted_ids})
     except ValueError as e:
+        app.logger.error("Transaction delete failed: id=%s error=%s", txn_id, e)
         return jsonify({'success': False, 'error': 'Operation failed'}), 404
 
 
@@ -697,7 +705,8 @@ def fetch_yahoo_price(ticker):
             price = data['chart']['result'][0]['meta']['regularMarketPrice']
             _price_cache[ticker] = (price, now)
             return price
-    except Exception:
+    except Exception as e:
+        app.logger.warning("Yahoo Finance fetch failed for %s: %s", ticker, e)
         return None
 
 
@@ -961,6 +970,7 @@ def api_ingest_draft():
     # Validate API key
     api_key = request.headers.get('X-API-Key', '')
     if not api_key or api_key != config.get('api_key', ''):
+        app.logger.warning("Draft ingest: invalid API key from %s", request.remote_addr)
         return jsonify({'success': False, 'error': 'Invalid API key'}), 401
 
     data = request.get_json(silent=True) or {}
@@ -968,11 +978,14 @@ def api_ingest_draft():
     if not html:
         return jsonify({'success': False, 'error': 'No HTML content provided'}), 400
 
+    app.logger.info("Draft ingest: received email from %s (%d bytes)", request.remote_addr, len(html))
+
     from email_parser import strip_email_html, parse_with_llm, build_default_prompt
 
     # Strip HTML to get transaction text
     email_text = strip_email_html(html)
     if not email_text:
+        app.logger.info("Draft ingest: skipped (non-transaction/promotional email)")
         return jsonify({'success': True, 'skipped': True, 'reason': 'Non-transaction email'}), 200
 
     # Build prompt
@@ -987,7 +1000,10 @@ def api_ingest_draft():
 
     parsed = parse_with_llm(email_text, llm_url, system_prompt)
     if not parsed:
+        app.logger.error("Draft ingest: LLM failed to parse email text: %s", email_text[:100])
         return jsonify({'success': False, 'error': 'Failed to parse email'}), 422
+
+    app.logger.info("Draft ingest: LLM parsed — merchant='%s' amount=%.2f date=%s account='%s'", parsed['merchant'], parsed['amount'], parsed['date'], parsed['account'])
 
     # Deduplication check
     fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
@@ -995,6 +1011,7 @@ def api_ingest_draft():
         drafts = load_drafts()
         for d in drafts:
             if d.get('fingerprint') == fp:
+                app.logger.info("Draft ingest: skipped (duplicate fingerprint: %s)", fp)
                 return jsonify({'success': True, 'skipped': True, 'reason': 'Duplicate'}), 200
 
         draft = {
@@ -1014,6 +1031,7 @@ def api_ingest_draft():
         drafts.append(draft)
         save_drafts(drafts)
 
+    app.logger.info("Draft created: id=%s merchant='%s' amount=%.2f", draft['id'], draft['merchant'], draft['amount'])
     return jsonify({'success': True, 'draft_id': draft['id']})
 
 
@@ -1098,8 +1116,10 @@ def api_accept_draft(draft_id):
             )
             draft['status'] = 'accepted'
             save_drafts(drafts)
+            app.logger.info("Draft accepted: draft_id=%s → txn_id=%s merchant='%s' amount=%.2f", draft_id, txn_id, draft['merchant'], draft['amount'])
             return jsonify({'success': True, 'txn_id': txn_id})
         except Exception as e:
+            app.logger.error("Draft accept failed: draft_id=%s error=%s", draft_id, e)
             return jsonify({'success': False, 'error': str(e)}), 400
 
 
@@ -1114,6 +1134,7 @@ def api_reject_draft(draft_id):
             return jsonify({'success': False, 'error': 'Draft not found'}), 404
         draft['status'] = 'rejected'
         save_drafts(drafts)
+    app.logger.info("Draft rejected: draft_id=%s merchant='%s'", draft_id, draft.get('merchant', ''))
     return jsonify({'success': True})
 
 
@@ -1131,6 +1152,10 @@ def api_update_draft(draft_id):
         for field in ('merchant', 'amount', 'date', 'account', 'category', 'sub_category', 'type'):
             if field in data:
                 draft[field] = data[field]
+
+        # Validate type
+        if draft.get('type') not in ('Expense', 'Income', 'Transfer'):
+            draft['type'] = 'Expense'
 
         # Update fingerprint if amount/date/merchant changed
         draft['fingerprint'] = draft_fingerprint(draft['amount'], draft['date'], draft['merchant'])
@@ -1162,8 +1187,8 @@ def api_accept_all_drafts():
                 )
                 draft['status'] = 'accepted'
                 txn_ids.append(txn_id)
-            except Exception:
-                pass  # Skip failed ones
+            except Exception as e:
+                app.logger.warning("Failed to accept draft %s: %s", draft.get('id'), e)
 
         save_drafts(drafts)
     return jsonify({'success': True, 'count': len(txn_ids), 'txn_ids': txn_ids})
@@ -1211,6 +1236,7 @@ def api_update_email_config():
         config['api_key'] = secrets.token_urlsafe(32)
 
     save_email_config(config)
+    app.logger.info("Email settings updated: enabled=%s llm_url=%s", config.get('enabled'), config.get('llm_url', ''))
     return jsonify({'success': True})
 
 

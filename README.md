@@ -44,10 +44,11 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 - Income, expense, and transfer tracking with per-transaction dashboard tracking toggle
 - **Investment portfolio**: live price fetching from Yahoo Finance, P&L tracking, auto-unit updates
 - **Fixed deposit tracking**: compound interest calculation, maturity countdown
-- **Net worth dashboard**: savings + investments - credit card debt
+- **Net worth dashboard**: savings + investments - credit card debt, with configurable milestone goals
+- **CC billing cycle tracking**: current cycle spend, projected bill, previous cycle comparison, days remaining
 - Sub-expense support — break down a transaction into individual items via modal
 - Category & sub-category management from the frontend
-- Dashboard with spending charts, stat cards, account balances, and custom date range filtering
+- Dashboard with spending charts, stat cards, account balances, cumulative daily average, and custom date range filtering
 - 7 color themes (GitHub, Indigo, Nord, Emerald, Rose, Amber, Ocean) with dark/light modes
 - Login authentication with bcrypt, rate limiting, and CSRF protection
 - First-time setup wizard — creates login, accounts, and categories
