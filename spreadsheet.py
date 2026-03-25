@@ -39,13 +39,15 @@ DATA_START = 2   # First transaction row
 # Cache parsed transactions to avoid re-reading xlsx on every request.
 # Invalidated when file modification time changes (i.e., after any write).
 _txn_cache = {'mtime': 0, 'data': None}
+_cache_lock = threading.Lock()
 
 
 # ── Workbook helpers ───────────────────────────────────────────────────────────
 
 def _invalidate_cache():
-    _txn_cache['mtime'] = 0
-    _txn_cache['data'] = None
+    with _cache_lock:
+        _txn_cache['mtime'] = 0
+        _txn_cache['data'] = None
 
 def load_workbook(data_only=False):
     if not os.path.exists(XLSX_PATH):
@@ -172,10 +174,11 @@ def parse_row(row, sheet_name):
 
 def get_all_transactions():
     """Return all transactions across all sheets, sorted by date desc. Cached."""
-    if os.path.exists(XLSX_PATH):
-        mtime = os.path.getmtime(XLSX_PATH)
-        if _txn_cache['data'] is not None and _txn_cache['mtime'] == mtime:
-            return _txn_cache['data']
+    with _cache_lock:
+        if os.path.exists(XLSX_PATH):
+            mtime = os.path.getmtime(XLSX_PATH)
+            if _txn_cache['data'] is not None and _txn_cache['mtime'] == mtime:
+                return _txn_cache['data']
 
     wb = load_workbook(data_only=True)
     transactions = []
@@ -187,9 +190,10 @@ def get_all_transactions():
                 transactions.append(parsed)
     transactions.sort(key=lambda t: (t['date'], t['id']), reverse=True)
 
-    if os.path.exists(XLSX_PATH):
-        _txn_cache['mtime'] = os.path.getmtime(XLSX_PATH)
-        _txn_cache['data'] = transactions
+    with _cache_lock:
+        if os.path.exists(XLSX_PATH):
+            _txn_cache['mtime'] = os.path.getmtime(XLSX_PATH)
+            _txn_cache['data'] = transactions
 
     return transactions
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'em-v1';
+const CACHE_NAME = 'em-v3';
 const PRECACHE = [
   '/static/themes.css',
   '/static/theme.js',

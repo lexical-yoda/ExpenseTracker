@@ -2,7 +2,9 @@
 
 ![Expense Manager Banner](screenshots/banner.png)
 
-A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data store, and multi-account support. Features 7 color themes, Plotly charts, investment tracking with live prices, CSRF protection, and full CRUD for transactions.
+A self-hosted personal finance tracker with multi-account support, investment tracking, analytics, and automated bank email parsing via local LLM. No database — all data lives in an Excel file.
+
+Built with Flask, Plotly, and openpyxl.
 
 ---
 
@@ -38,27 +40,47 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 
 ---
 
-## Features
+## What It Does
 
-- **Multiple account types**: savings, credit cards, and investment accounts (ETFs/stocks + fixed deposits)
-- Income, expense, and transfer tracking with per-transaction dashboard tracking toggle
-- **Investment portfolio**: live price fetching from Yahoo Finance, P&L tracking, auto-unit updates
-- **Fixed deposit tracking**: compound interest calculation, maturity countdown
-- **Net worth dashboard**: savings + investments - credit card debt, with configurable milestone goals
-- **CC billing cycle tracking**: current cycle spend, projected bill, previous cycle comparison, days remaining
-- Sub-expense support — break down a transaction into individual items via modal
-- Category & sub-category management from the frontend
-- Dashboard with spending charts, stat cards, account balances, cumulative daily average, and custom date range filtering
-- 7 color themes (GitHub, Indigo, Nord, Emerald, Rose, Amber, Ocean) with dark/light modes
-- Login authentication with bcrypt, rate limiting, and CSRF protection
-- First-time setup wizard — creates login, accounts, and categories
-- **Advanced filtering** — filter transactions by account, type, category, and date range
-- **CSV export** — download filtered transactions as CSV
-- **Undo delete** — restore accidentally deleted transactions (up to 20 in session)
-- **Email-to-expense pipeline** — paste bank emails or automate via n8n + local LLM parsing
-- **PWA support** — installable on phone home screen, offline caching for static assets
-- Mobile-responsive layout with no theme flash on page load
-- Transactions sorted by date and ID, grouped by day with day-of-week headers
+Expense Manager is a single-user, self-hosted web app for tracking personal finances. You add expenses and income, organize them by accounts and categories, and see where your money goes through interactive charts and analytics. It stores everything in an Excel file — no database setup, no cloud services, fully portable.
+
+### Core Features
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-account tracking** | Savings, credit cards, and investment accounts — each with their own balance logic |
+| **Income, expense & transfers** | Track money in, money out, and money moved between accounts |
+| **Sub-expenses** | Break down a grocery order or restaurant bill into individual items |
+| **Dashboard** | Stat cards, daily spending chart, cumulative average, category breakdown, account split, month-over-month comparison |
+| **Analytics** | Spending trends over time, day-of-week patterns, top merchants, spending velocity vs previous months |
+| **CC billing cycle** | Current cycle spend, projected bill, previous cycle bill, cycle-over-cycle comparison |
+| **Investments** | ETF/stock tracking with live Yahoo Finance prices, P&L, and auto-unit updates on purchase |
+| **Fixed deposits** | Compound interest calculation with maturity countdown |
+| **Net worth** | Savings + investments - CC debt, with configurable milestone goals and progress bar |
+
+### Quality of Life
+
+| Feature | Description |
+|---------|-------------|
+| **7 color themes** | GitHub, Indigo, Nord, Emerald, Rose, Amber, Ocean — each with dark and light modes |
+| **Email-to-expense** | Paste bank emails or automate via n8n + local LLM to auto-parse transactions |
+| **CSV export** | Download filtered transactions for tax filing or sharing |
+| **Undo delete** | Restore accidentally deleted transactions (up to 20 per session) |
+| **Track/untrack toggle** | Exclude specific transactions from dashboard stats without deleting them |
+| **Advanced filters** | Filter by account, type, category, date range, or search text |
+| **Pipeline history** | Full log of every email parsing attempt with status, retry for failures, and clear history |
+| **PWA** | Install on your phone's home screen, works offline for viewing |
+| **Mobile-first** | Responsive layout, no theme flash, pull-to-refresh |
+
+### Security
+
+| Feature | Description |
+|---------|-------------|
+| **Password auth** | bcrypt-hashed password, rate-limited login (5 attempts/min) |
+| **CSRF protection** | All forms protected with Flask-WTF tokens |
+| **Formula injection prevention** | Spreadsheet cells are sanitized against injection |
+| **Secure cookies** | HTTPOnly, SameSite=Lax, Secure flag in production |
+| **Setup wizard** | First-time setup creates credentials — no default passwords |
 
 ---
 
@@ -67,17 +89,17 @@ A mobile-friendly personal expense tracker with a Flask backend, `.xlsx` data st
 | URL | Purpose |
 |-----|---------|
 | `/` | Redirects to dashboard |
-| `/setup` | First-time setup (create login & accounts) |
+| `/setup` | First-time setup wizard — create login, add accounts |
 | `/login` | Sign in |
-| `/dashboard` | Charts, stats, account balances, investments & net worth (home page) |
+| `/dashboard` | Home page — charts, stats, account balances, investments, net worth, billing cycle |
 | `/analytics` | Spending trends, category trends, day-of-week patterns, merchant analysis, spending velocity |
-| `/manage` | Add transactions + transaction list with edit/delete/track toggle |
-| `/accounts` | Manage accounts (savings, credit, investment/ETF, fixed deposits) |
-| `/settings` | LLM config, email automation (n8n), webhook, account mapping, custom prompt |
+| `/manage` | Add/edit/delete transactions, sub-expenses, draft review, paste email parsing |
+| `/accounts` | Manage accounts — savings, credit cards, ETFs, fixed deposits |
+| `/settings` | LLM config, email automation, webhook, account mapping, custom prompt |
 
 ---
 
-## Quick start
+## Quick Start
 
 ### Docker (recommended)
 
@@ -92,7 +114,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-On first launch, open `http://localhost:5000` — the setup wizard will guide you through creating your login and adding accounts.
+Open `http://localhost:5000` — the setup wizard guides you through creating your login and adding accounts.
 
 ---
 
@@ -102,20 +124,20 @@ All user data lives in the `data/` folder:
 
 | File | Contents |
 |------|----------|
-| `data/auth.json` | Login credentials (username + bcrypt hash) |
-| `data/accounts.json` | Account definitions (savings, credit, investment with tickers/FD details) |
-| `data/categories.json` | Category and sub-category definitions |
-| `data/expenses.xlsx` | All transaction data |
+| `auth.json` | Login credentials (username + bcrypt hash + net worth goal) |
+| `accounts.json` | Account definitions (savings, credit, investment with tickers/FD details) |
+| `categories.json` | Category and sub-category definitions |
+| `expenses.xlsx` | All transaction data (one sheet per month) |
+| `drafts.json` | Pending email-parsed drafts (auto-created) |
+| `email_config.json` | LLM + webhook config (auto-created via Settings) |
 
-To migrate or restore: copy the entire `data/` folder to the new install. The app handles an empty or missing `data/` folder gracefully — it will show the setup wizard to start fresh.
-
-The `.env` file holds only server config (host, port, secret key) and is auto-generated during setup if missing.
+**To migrate or back up**: copy the entire `data/` folder. The app handles an empty or missing `data/` folder — it shows the setup wizard to start fresh.
 
 ---
 
 ## Investment Tracking
 
-### Market/ETF accounts
+### Market / ETF Accounts
 - Add an investment account with a **Yahoo Finance ticker** (e.g., `NIFTYBEES.NS`, `GOLDBEES.NS`)
 - Enter units held and total invested amount
 - Dashboard fetches live prices and shows current value, P&L (amount + percentage)
@@ -124,18 +146,31 @@ The `.env` file holds only server config (host, port, secret key) and is auto-ge
 ### Fixed Deposits
 - Add an investment account with subtype **Fixed Deposit**
 - Enter principal, interest rate, start date, maturity date, and compounding frequency
-- Dashboard calculates current value with compound interest and shows days remaining
+- Dashboard calculates current value with compound interest and shows days remaining to maturity
 
 ### Net Worth
-Dashboard shows a net worth card: sum of all savings + investment current values - credit card outstanding.
+The dashboard shows: sum of all savings balances + investment current values - credit card outstanding. A configurable milestone goal with progress bar auto-advances as you hit targets.
 
 ---
 
-## Email-to-Expense (LLM parsing)
+## Credit Card Billing Cycle
 
-Automatically parse bank transaction alert emails into expense entries using a local LLM.
+Set a `billing_date` on any credit card account (e.g., 14 for 14th of each month). The dashboard then shows:
 
-### How it works
+- **Current cycle spend** — CC expenses since billing date
+- **Projected bill** — extrapolated from daily average
+- **Previous cycle bill** — last cycle's total
+- **Cycle-over-cycle** — spending up or down vs previous cycle (with percentage)
+- **Days remaining** — countdown to cycle end
+- **Total CC outstanding** — all-time accumulated CC balance
+
+---
+
+## Email-to-Expense Pipeline
+
+Parse bank transaction alert emails into expense entries using a local LLM. Supports manual paste and automated ingestion via n8n.
+
+### How It Works
 
 ```
 Bank sends email → Your inbox → n8n detects it → POSTs to app webhook
@@ -143,126 +178,120 @@ Bank sends email → Your inbox → n8n detects it → POSTs to app webhook
 → Draft transaction created → you review on Manage page → accept/edit/reject
 ```
 
-### Three ways to use it
+Every step is logged in the **Pipeline History** (Settings page) — you can see which emails were processed, which failed, and retry failures with one click.
+
+### Three Ways to Use
 
 | Method | Setup | Best for |
 |--------|-------|----------|
-| **Paste mode** | None — just paste email text on the Manage page | Quick manual entry |
-| **n8n automation** | Install n8n, import workflow template, configure | Hands-free automation |
+| **Paste mode** | None — paste email text on Manage page | Quick one-off entry |
+| **n8n automation** | Install n8n, import workflow template, configure IMAP | Hands-free automation |
 | **Webhook API** | `POST /api/drafts/ingest` with API key | Custom integrations |
 
 ### Setup
 
-1. Go to **Settings** → enable LLM, enter your LLM endpoint URL (e.g., Ollama, llama.cpp)
+1. **Settings** → enable LLM, enter your LLM endpoint URL (e.g., Ollama, llama.cpp)
 2. Add **account mappings** (e.g., `"account 7621"` → `"HDFC Savings"`)
-3. (Optional) Customize the parsing prompt for your bank — the Settings page has an in-app guide
+3. (Optional) Customize the parsing prompt — the Settings page has an in-app guide for generating prompts for any bank
 4. For automation: install [n8n](https://n8n.io), import the workflow template from Settings, configure your email credentials
+5. After first login, a **setup banner** on the Dashboard guides you to configure this
 
-The app ships with a default prompt for HDFC Bank (India). For other banks, follow the Prompt Setup Guide on the Settings page — it walks you through using any LLM to generate a parsing prompt for your bank.
+### Pipeline History & Retry
+
+- **Settings → Pipeline History** shows all parsing attempts
+- Filter by status: success, failed, skipped, duplicate
+- **Retry** failed entries with one click — useful if the LLM was temporarily down
+- History is capped at 500 entries and auto-cleaned
+
+### Handling Rapid Transactions
+
+Multiple bank emails arriving in quick succession (e.g., during travel) are handled via:
+- **n8n queues** emails and processes them sequentially
+- **Deduplication** prevents the same transaction from being created twice (fingerprint matching on amount + date + merchant)
+- **Rate limiting** on the webhook endpoint (30/min) prevents abuse
+- All attempts are logged in Pipeline History regardless of outcome
 
 ### Requirements
 
 - A local LLM with an OpenAI-compatible API (`/v1/chat/completions`) — e.g., llama.cpp, Ollama, LM Studio
-- (For automation) n8n instance with access to your email inbox
+- (For automation) n8n instance with access to your email inbox via IMAP
 
 ---
 
-## Resetting credentials
-
-### Password reset script
+## Password Reset
 
 ```bash
-# Local — interactive prompt
+# Interactive
 python scripts/reset_password.py
 
-# Local — non-interactive
+# Non-interactive
 python scripts/reset_password.py -p mynewpassword
 
 # Docker
 sudo docker exec -it expense-manager python scripts/reset_password.py
 ```
 
-### Manual reset
-
-1. Generate a new password hash:
-   ```bash
-   python -c "import bcrypt; print(bcrypt.hashpw(b'newpassword', bcrypt.gensalt()).decode())"
-   ```
-
-2. Edit `data/auth.json`:
-   ```json
-   {
-     "username": "newusername",
-     "password_hash": "<paste hash here>"
-   }
-   ```
-
-3. Restart the app.
-
-### Full reset
-
 To start completely fresh, delete the `data/` folder and restart — the setup wizard will appear.
 
 ---
 
-## Project structure
+## Project Structure
 
 ```
-├── app.py              # Flask routes, auth, API endpoints, investment price fetching
-├── spreadsheet.py      # openpyxl read/write, balance computation, formula sanitization
-├── email_parser.py     # HTML email stripping + LLM parsing for bank transaction emails
+├── app.py                # Flask routes, auth, API endpoints, investment prices
+├── spreadsheet.py        # openpyxl read/write, balance computation
+├── email_parser.py       # HTML email stripping + LLM parsing
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
-├── .env                # Server config (not in git, auto-generated)
-├── .github/
-│   └── workflows/
-│       └── docker.yml  # GitHub Actions — auto-build and push Docker image to ghcr.io
-├── data/               # All user data (not in git)
-│   ├── auth.json       # Login credentials
-│   ├── accounts.json   # Account definitions (savings, credit, investment)
-│   ├── categories.json # Category definitions
-│   ├── expenses.xlsx   # Transaction data
-│   ├── drafts.json     # Pending email-parsed drafts (auto-created)
-│   └── email_config.json  # LLM + webhook config (auto-created via Settings)
+├── .github/workflows/
+│   └── docker.yml        # Auto-build + push Docker image to ghcr.io
+├── data/                 # All user data (not in git)
+│   ├── auth.json
+│   ├── accounts.json
+│   ├── categories.json
+│   ├── expenses.xlsx
+│   ├── drafts.json       # Auto-created
+│   └── email_config.json # Auto-created via Settings
 ├── scripts/
-│   ├── take_screenshots.py  # Automated screenshot generator (selenium + geckodriver)
-│   └── reset_password.py   # CLI password reset tool
-├── screenshots/             # Auto-generated README screenshots
+│   ├── reset_password.py
+│   └── take_screenshots.py
 ├── static/
-│   ├── themes.css      # 7 color palettes (dark + light each)
-│   ├── theme.js        # Theme picker logic + localStorage
-│   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, PWA SW
-│   ├── sw.js           # Service worker (network-first for data, cache-first for static)
-│   ├── n8n-email-workflow.json  # Importable n8n workflow for email automation
-│   ├── favicon.svg     # App favicon
-│   ├── icon-192.png    # PWA icon
-│   └── icon-512.png    # PWA icon
+│   ├── themes.css        # 7 palettes × 2 modes
+│   ├── theme.js          # Theme picker + localStorage
+│   ├── interactions.js   # Counters, toasts, pull-to-refresh, auto-refresh
+│   ├── sw.js             # Service worker for PWA
+│   ├── n8n-email-workflow.json
+│   ├── favicon.svg
+│   ├── icon-192.png
+│   └── icon-512.png
 └── templates/
-    ├── setup.html      # First-time setup wizard
-    ├── login.html      # Login page
-    ├── dashboard.html  # Plotly charts, stats, investments & net worth (home page)
-    ├── analytics.html  # Spending trends, category analysis, merchant breakdown
-    ├── manage.html     # Add transactions + transaction list + draft review + paste email
-    ├── accounts.html   # Account management (savings, credit, investment, FD)
-    └── settings.html   # LLM config, n8n setup guide, webhook, account mapping, custom prompt
+    ├── setup.html
+    ├── login.html
+    ├── dashboard.html
+    ├── analytics.html
+    ├── manage.html
+    ├── accounts.html
+    └── settings.html
 ```
 
 ---
 
 ## Notes
 
-- Only parent transactions count toward balance calculations — sub-items don't double-count
-- Transactions can be toggled as "tracked" or "untracked" — untracked ones still affect account balances but are excluded from dashboard charts and spending totals
+- Only parent transactions count toward balances — sub-items don't double-count
+- "Untracked" transactions affect balances but are excluded from charts and stats
 - Transaction IDs are global integers across all months
-- The `.xlsx` is the single source of truth — you can edit it manually in a spreadsheet app
-- `categories.json` and `accounts.json` are updated live from the frontend — no restart needed
-- Themes persist across pages via localStorage with no flash of unstyled content
-- Investment prices are fetched from Yahoo Finance (free, ~15min delay)
-- CC bill payments should be recorded as a Transfer from savings + Income on the CC account
+- The `.xlsx` is the single source of truth — editable in LibreOffice/Excel
+- CC bill payments: record as a Transfer from savings + Income on the CC account
+- Investment prices from Yahoo Finance are cached for 5 minutes (~15min market delay)
+- Categories, accounts, and settings are updated live — no restart needed
+- All operations are logged via `app.logger` — visible in `docker logs expense-manager`
 
 ---
 
-## Built with LLM
+## Built With LLM
 
-This project was built using an LLM (Claude). If you want to modify or extend it, feed [`LLM.md`](LLM.md) to your LLM — it contains a detailed implementation guide covering the architecture, data models, API endpoints, theming system, security measures, and common modification patterns.
+This project was built using an LLM (Claude). To modify or extend it, feed [`LLM.md`](LLM.md) to your LLM — it contains a detailed implementation guide covering architecture, data models, API endpoints, theming, security, and common modification patterns.
+
+For a comprehensive breakdown of every technology and service used, see [`LEARNING.md`](LEARNING.md).

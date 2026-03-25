@@ -6,6 +6,7 @@ No Flask dependencies — can be tested standalone.
 
 import re
 import json
+import html as html_module
 import urllib.request
 import urllib.error
 import logging
@@ -32,13 +33,8 @@ def strip_email_html(html: str) -> str | None:
     # Strip all remaining HTML tags
     text = re.sub(r'<[^>]+>', ' ', text)
 
-    # Decode common HTML entities
-    text = text.replace('&amp;', '&')
-    text = text.replace('&nbsp;', ' ')
-    text = text.replace('&lt;', '<')
-    text = text.replace('&gt;', '>')
-    text = text.replace('&quot;', '"')
-    text = text.replace('&#39;', "'")
+    # Decode all HTML entities (numeric, named, etc.)
+    text = html_module.unescape(text)
 
     # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()

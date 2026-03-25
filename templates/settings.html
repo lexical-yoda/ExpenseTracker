@@ -167,7 +167,7 @@
     <a href="/manage">Manage</a>
     <a href="/accounts">Accounts</a>
     <a href="/settings" class="active">Settings</a>
-    <a href="/logout" class="nav-logout">Log Out</a>
+    <a href="/logout" class="nav-logout" onclick="event.preventDefault();fetch('/logout',{method:'POST',headers:{'X-CSRFToken':document.querySelector('meta[name=csrf-token]').content}}).then(()=>location.href='/login')">Log Out</a>
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
   </div>
 </nav>
@@ -441,6 +441,25 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     </div>
   </div>
 
+  <!-- Pipeline History -->
+  <div class="card" style="margin-top:24px;">
+    <h2 style="margin-bottom:12px;">Pipeline History</h2>
+    <p style="color:var(--muted); font-size:0.85rem; margin-bottom:12px;">
+      Log of all email parsing attempts — webhook and paste. Shows success, failure, skipped, and duplicates.
+    </p>
+    <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+      <button class="btn btn-small" onclick="loadPipelineHistory('')" style="font-size:0.8rem;">All</button>
+      <button class="btn btn-small" onclick="loadPipelineHistory('success')" style="font-size:0.8rem;">Success</button>
+      <button class="btn btn-small" onclick="loadPipelineHistory('failed')" style="font-size:0.8rem;">Failed</button>
+      <button class="btn btn-small" onclick="loadPipelineHistory('skipped')" style="font-size:0.8rem;">Skipped</button>
+      <button class="btn btn-small" onclick="loadPipelineHistory('duplicate')" style="font-size:0.8rem;">Duplicate</button>
+      <button class="btn btn-small" onclick="clearPipelineHistory()" style="font-size:0.8rem; margin-left:auto; background:var(--danger); color:#fff;">Clear History</button>
+    </div>
+    <div id="pipeline-history" style="max-height:400px; overflow-y:auto;">
+      <p style="color:var(--muted); text-align:center;">Loading...</p>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -570,6 +589,98 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     navigator.clipboard.writeText(text);
     showToast('Copied!');
   }
+
+  // ── Pipeline History ──
+  async function loadPipelineHistory(statusFilter) {
+    const container = document.getElementById('pipeline-history');
+    container.innerHTML = '<p style="color:var(--muted); text-align:center;">Loading...</p>';
+    const url = statusFilter ? `/api/pipeline/history?status=${statusFilter}&limit=100` : '/api/pipeline/history?limit=100';
+    try {
+      const resp = await fetch(url);
+      const entries = await resp.json();
+      if (!entries.length) {
+        container.innerHTML = '<p style="color:var(--muted); text-align:center;">No pipeline activity yet.</p>';
+        return;
+      }
+      const esc = (s) => {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      };
+      const statusBadge = (s) => {
+        const safe = esc(s);
+        const colors = { success: 'var(--success)', failed: 'var(--danger)', skipped: 'var(--muted)', duplicate: 'var(--cc)', retry: 'var(--accent)' };
+        return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;background:${colors[s]||'var(--muted)'};color:#fff;">${safe.toUpperCase()}</span>`;
+      };
+      let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">';
+      html += '<thead><tr style="border-bottom:1px solid var(--border);">';
+      html += '<th style="text-align:left;padding:6px;">Time</th>';
+      html += '<th style="text-align:left;padding:6px;">Status</th>';
+      html += '<th style="text-align:left;padding:6px;">Source</th>';
+      html += '<th style="text-align:left;padding:6px;">Details</th>';
+      html += '<th style="text-align:left;padding:6px;">Action</th>';
+      html += '</tr></thead><tbody>';
+      entries.forEach(e => {
+        const time = e.timestamp ? new Date(e.timestamp).toLocaleString() : '—';
+        const details = e.parsed
+          ? `${esc(e.parsed.merchant || '—')} — ₹${(e.parsed.amount||0).toLocaleString('en-IN')} (${esc(e.parsed.date||'—')})`
+          : esc(e.error || e.email_preview || '—');
+        const retryBtn = e.status === 'failed' && e.email_preview
+          ? `<button class="btn btn-small" onclick="retryPipeline(${parseInt(e.id)||0})" style="font-size:0.75rem;padding:2px 8px;">Retry</button>`
+          : (e.draft_id ? `Draft #${parseInt(e.draft_id)||0}` : '—');
+        html += `<tr style="border-bottom:1px solid var(--border);">`;
+        html += `<td style="padding:6px;white-space:nowrap;">${esc(time)}</td>`;
+        html += `<td style="padding:6px;">${statusBadge(e.status)}</td>`;
+        html += `<td style="padding:6px;">${esc(e.source || '—')}</td>`;
+        html += `<td style="padding:6px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(details)}">${details}</td>`;
+        html += `<td style="padding:6px;">${retryBtn}</td>`;
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    } catch (err) {
+      container.innerHTML = `<p style="color:var(--danger);">Failed to load: ${err.message}</p>`;
+    }
+  }
+
+  async function retryPipeline(logId) {
+    try {
+      const resp = await fetch(`/api/pipeline/retry/${logId}`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken}
+      });
+      const data = await resp.json();
+      if (data.success) {
+        showToast('Retry successful — draft created');
+        loadPipelineHistory('');
+      } else {
+        showToast(data.error || 'Retry failed');
+        loadPipelineHistory('');
+      }
+    } catch (err) {
+      showToast('Retry failed: ' + err.message);
+    }
+  }
+
+  async function clearPipelineHistory() {
+    if (!confirm('Clear all pipeline history?')) return;
+    try {
+      const resp = await fetch('/api/pipeline/clear', {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken}
+      });
+      const data = await resp.json();
+      if (data.success) {
+        showToast('History cleared');
+        loadPipelineHistory('');
+      }
+    } catch (err) {
+      showToast('Failed to clear: ' + err.message);
+    }
+  }
+
+  // Load history on page load
+  loadPipelineHistory('');
 </script>
 <script src="/static/theme.js"></script>
 <script>

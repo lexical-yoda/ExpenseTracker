@@ -186,12 +186,25 @@
     <a href="/manage">Manage</a>
     <a href="/accounts">Accounts</a>
     <a href="/settings">Settings</a>
-    <a href="/logout" class="nav-logout">Log Out</a>
+    <a href="/logout" class="nav-logout" onclick="event.preventDefault();fetch('/logout',{method:'POST',headers:{'X-CSRFToken':document.querySelector('meta[name=csrf-token]').content}}).then(()=>location.href='/login')">Log Out</a>
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
   </div>
 </nav>
 
 <div class="container">
+  {% if show_email_setup %}
+  <div id="email-setup-banner" style="background:var(--surface); border:1px solid var(--accent); border-radius:8px; padding:14px 20px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+    <div>
+      <strong style="color:var(--accent);">Auto-parse bank emails into expenses</strong>
+      <span style="color:var(--muted); font-size:0.85rem;"> — set up LLM + email automation in Settings</span>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a href="/settings" style="background:var(--accent); color:#fff; padding:6px 14px; border-radius:6px; text-decoration:none; font-size:0.85rem; font-weight:600;">Set Up Now</a>
+      <button onclick="this.closest('#email-setup-banner').style.display='none'; localStorage.setItem('hideEmailBanner','1')" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:1.1rem; padding:4px;">&times;</button>
+    </div>
+  </div>
+  <script>if(localStorage.getItem('hideEmailBanner')==='1')document.getElementById('email-setup-banner').style.display='none';</script>
+  {% endif %}
   <div class="page-header">
     <div class="page-title">Dashboard</div>
     <div class="filter-row" id="filter-row">

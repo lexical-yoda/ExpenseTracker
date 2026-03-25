@@ -37,12 +37,13 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 │   └── workflows/
 │       └── docker.yml  # GitHub Actions — auto-build and push image to ghcr.io on push to main
 ├── data/               # All user data (back up this folder to migrate)
-│   ├── auth.json       # Login credentials (username + bcrypt hash)
+│   ├── auth.json       # Login credentials (username + bcrypt hash + net worth goal)
 │   ├── accounts.json   # Account definitions
 │   ├── categories.json # Category/sub-category definitions
 │   ├── expenses.xlsx   # Transaction data (one sheet per month)
 │   ├── drafts.json     # Pending email-parsed draft transactions (auto-created)
-│   └── email_config.json  # LLM + webhook config (auto-created via Settings page)
+│   ├── email_config.json  # LLM + webhook config (auto-created via Settings page)
+│   └── pipeline_log.json  # Email parsing attempt history (auto-created)
 ├── scripts/
 │   ├── take_screenshots.py  # Selenium-based screenshot generator for README
 │   └── reset_password.py   # CLI password reset (interactive or -p flag)
@@ -77,7 +78,8 @@ Single object with login credentials. File permissions set to 600 on creation.
 ```json
 {
   "username": "admin",
-  "password_hash": "$2b$12$..."
+  "password_hash": "$2b$12$...",
+  "nw_goal_increment": 500000
 }
 ```
 
@@ -185,7 +187,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 ### Navigation
 
 - Logo ("Expense Manager") links to `/` which redirects to dashboard (home page)
-- Nav links: `Dashboard`, `Analytics`, `Manage`, `Accounts`, theme picker button, `Log Out`
+- Nav links: `Dashboard`, `Analytics`, `Manage`, `Accounts`, `Settings`, theme picker button, `Log Out`
 - On mobile (< 600px), nav wraps: logo on its own row, links centered below
 
 ### Managing transactions (`/manage`)
@@ -339,7 +341,7 @@ All templates are standalone HTML files (no base template / inheritance). Each i
 
 ### UI Patterns
 
-- **Nav bar**: Sticky top, logo left (links to dashboard), links right: Dashboard, Manage, Accounts, Log Out, theme picker. On mobile, wraps to two rows.
+- **Nav bar**: Sticky top, logo left (links to dashboard), links right: Dashboard, Analytics, Manage, Accounts, Settings, Log Out, theme picker. On mobile, wraps to two rows.
 - **Forms**: Surface-colored cards, accent-colored focus rings, uppercase labels
 - **Modals**: Bottom-sheet style (slides up from bottom), backdrop blur, close on overlay click
 - **Toasts**: Fixed bottom-center, pill-shaped, auto-dismiss after 2.5s
@@ -481,7 +483,7 @@ gunicorn>=21.2.0
 3. Include `<link rel="stylesheet" href="/static/themes.css">` in head
 4. Include `<script src="/static/theme.js"></script>` and `<script>initThemePicker();</script>` before `</body>`
 5. Add CSRF meta tag if the page makes fetch() calls
-6. Add nav link in ALL templates' `.nav-links` div (dashboard.html, analytics.html, manage.html, accounts.html)
+6. Add nav link in ALL templates' `.nav-links` div (dashboard.html, analytics.html, manage.html, accounts.html, settings.html)
 
 ### Adding a new field to transactions
 
@@ -605,6 +607,32 @@ The app ships with an importable n8n workflow template at `static/n8n-email-work
 3. **HTTP Request** — POSTs email HTML to `/api/drafts/ingest` with API key
 
 Users configure their email credentials in n8n, not in the app. The app only needs the LLM URL and API key.
+
+### Pipeline history
+
+Every email parsing attempt is logged in `data/pipeline_log.json`:
+
+```json
+{
+  "id": 1,
+  "timestamp": "2026-03-25T10:30:00",
+  "status": "success",         // success, failed, skipped, duplicate
+  "source": "webhook",         // webhook, paste, retry
+  "email_preview": "Dear Customer, Rs.450...",
+  "parsed": {"amount": 450, "merchant": "Swiggy", "date": "2026-03-24", "account": "HDFC Savings"},
+  "error": null,
+  "draft_id": 5
+}
+```
+
+**Endpoints:**
+- `GET /api/pipeline/history?status=failed&limit=50` — filtered, newest first
+- `POST /api/pipeline/retry/<log_id>` — retry a failed entry (re-sends to LLM, creates draft on success)
+- `POST /api/pipeline/clear` — clear all history
+
+**UI:** Settings page has a "Pipeline History" section with filter buttons, status badges, retry buttons, and clear history.
+
+**Limits:** capped at 500 entries (oldest pruned automatically).
 
 ### Security notes
 

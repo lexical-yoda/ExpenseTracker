@@ -8,13 +8,14 @@ import bcrypt
 import json
 import os
 import secrets
+import hmac
 import threading
 import urllib.request
 import urllib.error
 from spreadsheet import (
     get_all_transactions, add_transaction, get_transaction_by_id,
     get_monthly_summary, update_transaction, delete_transaction,
-    rename_account_in_sheets, compute_account_balances
+    rename_account_in_sheets, compute_account_balances, _accounts_lock
 )
 from datetime import date, datetime, timedelta
 
@@ -84,6 +85,7 @@ ACCOUNTS_FILE = os.path.join(DATA_DIR, 'accounts.json')
 CATEGORIES_FILE = os.path.join(DATA_DIR, 'categories.json')
 DRAFTS_FILE = os.path.join(DATA_DIR, 'drafts.json')
 EMAIL_CONFIG_FILE = os.path.join(DATA_DIR, 'email_config.json')
+PIPELINE_LOG_FILE = os.path.join(DATA_DIR, 'pipeline_log.json')
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -217,7 +219,10 @@ def setup():
             os.makedirs(DATA_DIR, exist_ok=True)
 
             # Parse net worth goal increment
-            nw_increment = float(request.form.get('nw_goal_increment', 500000) or 500000)
+            try:
+                nw_increment = float(request.form.get('nw_goal_increment', 500000) or 500000)
+            except (ValueError, TypeError):
+                nw_increment = 500000
             if nw_increment < 10000:
                 nw_increment = 500000
 
@@ -274,7 +279,7 @@ def setup():
     return render_template('setup.html', error=error)
 
 
-@app.route('/logout')
+@app.route('/logout', methods=['GET', 'POST'])
 @login_required
 def logout():
     logout_user()
@@ -286,8 +291,12 @@ def logout():
 def load_categories():
     if not os.path.exists(CATEGORIES_FILE):
         return {}
-    with open(CATEGORIES_FILE, 'r') as f:
-        return json.load(f)
+    try:
+        with open(CATEGORIES_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        app.logger.error("Corrupt categories.json — returning empty")
+        return {}
 
 def save_categories(data):
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -300,8 +309,12 @@ def save_categories(data):
 def load_accounts():
     if not os.path.exists(ACCOUNTS_FILE):
         return []
-    with open(ACCOUNTS_FILE, 'r') as f:
-        return json.load(f)
+    try:
+        with open(ACCOUNTS_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        app.logger.error("Corrupt accounts.json — returning empty")
+        return []
 
 def save_accounts(data):
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -364,6 +377,46 @@ def get_default_email_config():
     }
 
 
+# ── Pipeline log helpers ─────────────────────────────────────────────────────
+
+_pipeline_lock = threading.Lock()
+MAX_PIPELINE_LOG = 500  # Keep last 500 entries
+
+def load_pipeline_log():
+    if not os.path.exists(PIPELINE_LOG_FILE):
+        return []
+    try:
+        with open(PIPELINE_LOG_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return []
+
+def save_pipeline_log(entries):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    # Keep only last MAX_PIPELINE_LOG entries
+    entries = entries[-MAX_PIPELINE_LOG:]
+    with open(PIPELINE_LOG_FILE, 'w') as f:
+        json.dump(entries, f, indent=2)
+
+def log_pipeline_event(status, source, email_preview='', parsed=None, error=None, draft_id=None):
+    """Log an email parsing attempt to the pipeline history."""
+    with _pipeline_lock:
+        entries = load_pipeline_log()
+        entry = {
+            'id': (max((e.get('id', 0) for e in entries), default=0) + 1),
+            'timestamp': datetime.now().isoformat(timespec='seconds'),
+            'status': status,  # success, failed, skipped, duplicate
+            'source': source,  # webhook, paste
+            'email_preview': email_preview[:200] if email_preview else '',
+            'parsed': parsed,
+            'error': error,
+            'draft_id': draft_id
+        }
+        entries.append(entry)
+        save_pipeline_log(entries)
+    return entry
+
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
 @app.route('/')
@@ -422,7 +475,9 @@ def dashboard():
     accounts = load_accounts()
     balances = compute_account_balances()
     nw_increment, _ = get_nw_goal()
-    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, nw_goal_increment=nw_increment)
+    email_config = load_email_config()
+    show_email_setup = not email_config or not email_config.get('enabled')
+    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, nw_goal_increment=nw_increment, show_email_setup=show_email_setup)
 
 
 @app.route('/analytics')
@@ -446,9 +501,19 @@ def accounts_page():
 @login_required
 def api_add_transaction():
     data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid request body'}), 400
     txn_type = data.get('type', 'Expense')
     if txn_type not in ('Expense', 'Income', 'Transfer'):
         return jsonify({'success': False, 'error': 'Type must be Expense, Income, or Transfer'}), 400
+    if not data.get('description', '').strip():
+        return jsonify({'success': False, 'error': 'Description is required'}), 400
+    try:
+        amount = float(data['amount'])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Valid amount is required'}), 400
+    if amount <= 0:
+        return jsonify({'success': False, 'error': 'Amount must be positive'}), 400
     try:
         units = float(data['units']) if data.get('units') else None
         txn_id = add_transaction(
@@ -457,7 +522,7 @@ def api_add_transaction():
             category=data['category'],
             sub_category=data.get('sub_category', ''),
             account=data['account'],
-            amount=float(data['amount']),
+            amount=amount,
             parent_id=data.get('parent_id') or None,
             txn_type=txn_type,
             track=data.get('track', True),
@@ -465,6 +530,12 @@ def api_add_transaction():
         )
         app.logger.info("Transaction created: id=%s desc='%s' amount=%.2f account='%s' type=%s", txn_id, data['description'], float(data['amount']), data['account'], txn_type)
         return jsonify({'success': True, 'id': txn_id})
+    except KeyError as e:
+        app.logger.error("Transaction create failed: missing field %s", e)
+        return jsonify({'success': False, 'error': f'Missing required field: {e}'}), 400
+    except (ValueError, TypeError) as e:
+        app.logger.error("Transaction create failed: %s | data=%s", e, {k: v for k, v in data.items() if k != 'csrf_token'})
+        return jsonify({'success': False, 'error': 'Invalid field value — check date format and numeric fields'}), 400
     except Exception as e:
         app.logger.error("Transaction create failed: %s | data=%s", e, {k: v for k, v in data.items() if k != 'csrf_token'})
         return jsonify({'success': False, 'error': 'Operation failed'}), 400
@@ -489,14 +560,22 @@ def api_get_transaction(txn_id):
 @login_required
 def api_update_transaction(txn_id):
     data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid request body'}), 400
     txn_type = data.get('type', 'Expense')
     if txn_type not in ('Expense', 'Income', 'Transfer'):
         return jsonify({'success': False, 'error': 'Type must be Expense, Income, or Transfer'}), 400
+    if 'amount' in data:
+        try:
+            if float(data['amount']) <= 0:
+                return jsonify({'success': False, 'error': 'Amount must be positive'}), 400
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'Valid amount is required'}), 400
     try:
         updated = update_transaction(txn_id, data)
         app.logger.info("Transaction updated: id=%s", txn_id)
         return jsonify({'success': True, 'transaction': updated})
-    except ValueError as e:
+    except Exception as e:
         app.logger.error("Transaction update failed: id=%s error=%s", txn_id, e)
         return jsonify({'success': False, 'error': 'Operation failed'}), 400
 
@@ -522,7 +601,12 @@ def api_toggle_track(txn_id):
         txn = get_transaction_by_id(txn_id)
         if not txn:
             return jsonify({'success': False, 'error': 'Transaction not found'}), 404
-        updated = update_transaction(txn_id, {**txn, 'track': track})
+        # Only update the track field to avoid rewriting all cells
+        minimal = {'date': txn['date'], 'description': txn['description'], 'category': txn['category'],
+                   'sub_category': txn.get('sub_category', ''), 'account': txn['account'],
+                   'amount': txn['amount'], 'type': txn.get('type', 'Expense'), 'track': track,
+                   'units': txn.get('units')}
+        updated = update_transaction(txn_id, minimal)
         return jsonify({'success': True, 'transaction': updated})
     except (ValueError, TypeError):
         return jsonify({'success': False, 'error': 'Operation failed'}), 400
@@ -569,7 +653,6 @@ def api_get_accounts():
 @login_required
 def api_add_account():
     data = request.get_json()
-    accounts = load_accounts()
 
     name = data.get('name', '').strip()
     acct_type = data.get('type', '').strip()
@@ -578,33 +661,39 @@ def api_add_account():
         return jsonify({'success': False, 'error': 'Account name required'}), 400
     if acct_type not in ('savings', 'credit', 'investment'):
         return jsonify({'success': False, 'error': 'Type must be savings, credit, or investment'}), 400
-    if any(a['name'] == name for a in accounts):
-        return jsonify({'success': False, 'error': 'Account name already exists'}), 400
 
-    new_id = max((a['id'] for a in accounts), default=0) + 1
-    new_account = {'id': new_id, 'name': name, 'type': acct_type}
+    with _accounts_lock:
+        accounts = load_accounts()
+        if any(a['name'] == name for a in accounts):
+            return jsonify({'success': False, 'error': 'Account name already exists'}), 400
 
-    if acct_type == 'savings':
-        new_account['balance'] = float(data.get('balance', 0))
-    elif acct_type == 'credit':
-        new_account['limit'] = float(data.get('limit', 0))
-        if 'billing_date' in data:
-            new_account['billing_date'] = int(data['billing_date'])
-    elif acct_type == 'investment':
-        subtype = data.get('subtype', 'market').strip()
-        new_account['subtype'] = subtype
-        new_account['balance'] = float(data.get('balance', 0))
-        if subtype == 'fd':
-            new_account['interest_rate'] = float(data.get('interest_rate', 0))
-            new_account['start_date'] = data.get('start_date', '')
-            new_account['maturity_date'] = data.get('maturity_date', '')
-            new_account['compounding'] = data.get('compounding', 'quarterly')
-        else:
-            new_account['ticker'] = data.get('ticker', '').strip()
-            new_account['units'] = float(data.get('units', 0))
+        new_id = max((a['id'] for a in accounts), default=0) + 1
+        new_account = {'id': new_id, 'name': name, 'type': acct_type}
 
-    accounts.append(new_account)
-    save_accounts(accounts)
+        try:
+            if acct_type == 'savings':
+                new_account['balance'] = float(data.get('balance', 0))
+            elif acct_type == 'credit':
+                new_account['limit'] = float(data.get('limit', 0))
+                if 'billing_date' in data and data['billing_date']:
+                    new_account['billing_date'] = int(data['billing_date'])
+            elif acct_type == 'investment':
+                subtype = data.get('subtype', 'market').strip()
+                new_account['subtype'] = subtype
+                new_account['balance'] = float(data.get('balance', 0))
+                if subtype == 'fd':
+                    new_account['interest_rate'] = float(data.get('interest_rate', 0))
+                    new_account['start_date'] = data.get('start_date', '')
+                    new_account['maturity_date'] = data.get('maturity_date', '')
+                    new_account['compounding'] = data.get('compounding', 'quarterly')
+                else:
+                    new_account['ticker'] = data.get('ticker', '').strip()
+                    new_account['units'] = float(data.get('units', 0))
+        except (ValueError, TypeError) as e:
+            return jsonify({'success': False, 'error': 'Invalid numeric value in account fields'}), 400
+
+        accounts.append(new_account)
+        save_accounts(accounts)
     return jsonify({'success': True, 'account': new_account})
 
 
@@ -612,41 +701,45 @@ def api_add_account():
 @login_required
 def api_update_account(account_id):
     data = request.get_json()
-    accounts = load_accounts()
-
-    acct = next((a for a in accounts if a['id'] == account_id), None)
-    if not acct:
-        return jsonify({'success': False, 'error': 'Account not found'}), 404
 
     new_name = data.get('name', '').strip()
     if not new_name:
         return jsonify({'success': False, 'error': 'Account name required'}), 400
 
-    if any(a['name'] == new_name and a['id'] != account_id for a in accounts):
-        return jsonify({'success': False, 'error': 'Account name already exists'}), 400
+    with _accounts_lock:
+        accounts = load_accounts()
+        acct = next((a for a in accounts if a['id'] == account_id), None)
+        if not acct:
+            return jsonify({'success': False, 'error': 'Account not found'}), 404
 
-    old_name = acct['name']
+        if any(a['name'] == new_name and a['id'] != account_id for a in accounts):
+            return jsonify({'success': False, 'error': 'Account name already exists'}), 400
 
-    acct['name'] = new_name
-    if acct['type'] == 'savings':
-        acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
-    elif acct['type'] == 'credit':
-        acct['limit'] = float(data.get('limit', acct.get('limit', 0)))
-        if 'billing_date' in data:
-            acct['billing_date'] = int(data['billing_date'])
-    elif acct['type'] == 'investment':
-        acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
-        subtype = acct.get('subtype', 'market')
-        if subtype == 'fd':
-            acct['interest_rate'] = float(data.get('interest_rate', acct.get('interest_rate', 0)))
-            acct['start_date'] = data.get('start_date', acct.get('start_date', ''))
-            acct['maturity_date'] = data.get('maturity_date', acct.get('maturity_date', ''))
-            acct['compounding'] = data.get('compounding', acct.get('compounding', 'quarterly'))
-        else:
-            acct['ticker'] = data.get('ticker', acct.get('ticker', '')).strip()
-            acct['units'] = float(data.get('units', acct.get('units', 0)))
+        old_name = acct['name']
 
-    save_accounts(accounts)
+        try:
+            acct['name'] = new_name
+            if acct['type'] == 'savings':
+                acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
+            elif acct['type'] == 'credit':
+                acct['limit'] = float(data.get('limit', acct.get('limit', 0)))
+                if 'billing_date' in data and data['billing_date']:
+                    acct['billing_date'] = int(data['billing_date'])
+            elif acct['type'] == 'investment':
+                acct['balance'] = float(data.get('balance', acct.get('balance', 0)))
+                subtype = acct.get('subtype', 'market')
+                if subtype == 'fd':
+                    acct['interest_rate'] = float(data.get('interest_rate', acct.get('interest_rate', 0)))
+                    acct['start_date'] = data.get('start_date', acct.get('start_date', ''))
+                    acct['maturity_date'] = data.get('maturity_date', acct.get('maturity_date', ''))
+                    acct['compounding'] = data.get('compounding', acct.get('compounding', 'quarterly'))
+                else:
+                    acct['ticker'] = data.get('ticker', acct.get('ticker', '')).strip()
+                    acct['units'] = float(data.get('units', acct.get('units', 0)))
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'Invalid numeric value in account fields'}), 400
+
+        save_accounts(accounts)
 
     if old_name != new_name:
         rename_account_in_sheets(old_name, new_name)
@@ -657,18 +750,19 @@ def api_update_account(account_id):
 @app.route('/api/accounts/<int:account_id>', methods=['DELETE'])
 @login_required
 def api_delete_account(account_id):
-    accounts = load_accounts()
-    acct = next((a for a in accounts if a['id'] == account_id), None)
-    if not acct:
-        return jsonify({'success': False, 'error': 'Account not found'}), 404
+    with _accounts_lock:
+        accounts = load_accounts()
+        acct = next((a for a in accounts if a['id'] == account_id), None)
+        if not acct:
+            return jsonify({'success': False, 'error': 'Account not found'}), 404
 
-    transactions = get_all_transactions()
-    in_use = any(t['account'] == acct['name'] for t in transactions)
-    if in_use:
-        return jsonify({'success': False, 'error': 'Cannot delete — transactions use this account'}), 400
+        transactions = get_all_transactions()
+        in_use = any(t['account'] == acct['name'] for t in transactions)
+        if in_use:
+            return jsonify({'success': False, 'error': 'Cannot delete — transactions use this account'}), 400
 
-    accounts = [a for a in accounts if a['id'] != account_id]
-    save_accounts(accounts)
+        accounts = [a for a in accounts if a['id'] != account_id]
+        save_accounts(accounts)
     return jsonify({'success': True})
 
 
@@ -750,7 +844,10 @@ def calculate_fd_value(principal, annual_rate, start_date, maturity_date, compou
 @login_required
 def api_update_nw_goal():
     data = request.get_json()
-    increment = float(data.get('increment', 500000))
+    try:
+        increment = float(data.get('increment', 500000))
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'Invalid increment value'}), 400
     if increment < 10000:
         return jsonify({'success': False, 'error': 'Minimum increment is ₹10,000'}), 400
     auth = load_auth()
@@ -858,10 +955,18 @@ def api_export_csv():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['Date', 'ID', 'Description', 'Category', 'Sub-Category', 'Account', 'Amount', 'Type', 'Track', 'Units', 'Parent ID'])
+    def strip_sanitize_prefix(s):
+        """Remove the single-quote prefix added by sanitize_cell for CSV export."""
+        if isinstance(s, str) and s.startswith("'") and len(s) > 1 and s[1] in ('=', '+', '-', '@'):
+            return s[1:]
+        return s
+
     for t in transactions:
         writer.writerow([
-            t['date'], t['id'], t['description'], t['category'],
-            t.get('sub_category', ''), t['account'], t['amount'],
+            t['date'], t['id'], strip_sanitize_prefix(t['description']),
+            strip_sanitize_prefix(t['category']),
+            strip_sanitize_prefix(t.get('sub_category', '')),
+            strip_sanitize_prefix(t['account']), t['amount'],
             t['type'], 'Yes' if t.get('track', True) else 'No',
             t.get('units', ''), t.get('parent_id', '')
         ])
@@ -878,6 +983,7 @@ def api_export_csv():
 
 UNDO_STACK = []  # In-memory stack of deleted/edited transactions for undo
 MAX_UNDO = 20
+_undo_lock = threading.Lock()
 
 
 @app.route('/api/undo/delete', methods=['POST'])
@@ -894,14 +1000,15 @@ def api_undo_delete():
     all_txns = get_all_transactions()
     children = [t for t in all_txns if t.get('parent_id') == txn_id]
 
-    UNDO_STACK.append({
-        'action': 'delete',
-        'transaction': txn,
-        'children': children,
-        'timestamp': datetime.now().isoformat()
-    })
-    if len(UNDO_STACK) > MAX_UNDO:
-        UNDO_STACK.pop(0)
+    with _undo_lock:
+        UNDO_STACK.append({
+            'action': 'delete',
+            'transaction': txn,
+            'children': children,
+            'timestamp': datetime.now().isoformat()
+        })
+        if len(UNDO_STACK) > MAX_UNDO:
+            UNDO_STACK.pop(0)
 
     return jsonify({'success': True, 'undo_available': len(UNDO_STACK)})
 
@@ -910,10 +1017,10 @@ def api_undo_delete():
 @login_required
 def api_undo():
     """Undo the last delete operation by re-adding the transaction."""
-    if not UNDO_STACK:
-        return jsonify({'success': False, 'error': 'Nothing to undo'}), 400
-
-    entry = UNDO_STACK.pop()
+    with _undo_lock:
+        if not UNDO_STACK:
+            return jsonify({'success': False, 'error': 'Nothing to undo'}), 400
+        entry = UNDO_STACK.pop()
 
     if entry['action'] == 'delete':
         txn = entry['transaction']
@@ -961,21 +1068,25 @@ def api_undo_status():
 
 @app.route('/api/drafts/ingest', methods=['POST'])
 @csrf.exempt
+@limiter.limit("30 per minute")
 def api_ingest_draft():
     """Accept raw email HTML from watcher or webhook. CSRF-exempt, API-key auth."""
     config = load_email_config()
     if not config or not config.get('enabled'):
+        log_pipeline_event('failed', 'webhook', error='Email integration not enabled')
         return jsonify({'success': False, 'error': 'Email integration not enabled'}), 400
 
-    # Validate API key
+    # Validate API key (timing-safe comparison)
     api_key = request.headers.get('X-API-Key', '')
-    if not api_key or api_key != config.get('api_key', ''):
+    if not api_key or not hmac.compare_digest(api_key, config.get('api_key', '')):
         app.logger.warning("Draft ingest: invalid API key from %s", request.remote_addr)
+        log_pipeline_event('failed', 'webhook', error='Invalid API key')
         return jsonify({'success': False, 'error': 'Invalid API key'}), 401
 
     data = request.get_json(silent=True) or {}
     html = data.get('html', '')
     if not html:
+        log_pipeline_event('failed', 'webhook', error='No HTML content provided')
         return jsonify({'success': False, 'error': 'No HTML content provided'}), 400
 
     app.logger.info("Draft ingest: received email from %s (%d bytes)", request.remote_addr, len(html))
@@ -986,6 +1097,7 @@ def api_ingest_draft():
     email_text = strip_email_html(html)
     if not email_text:
         app.logger.info("Draft ingest: skipped (non-transaction/promotional email)")
+        log_pipeline_event('skipped', 'webhook', email_preview=html[:200], error='Non-transaction/promotional email')
         return jsonify({'success': True, 'skipped': True, 'reason': 'Non-transaction email'}), 200
 
     # Build prompt
@@ -996,11 +1108,13 @@ def api_ingest_draft():
     # Parse with LLM
     llm_url = config.get('llm_url', '')
     if not llm_url:
+        log_pipeline_event('failed', 'webhook', email_preview=email_text, error='LLM URL not configured')
         return jsonify({'success': False, 'error': 'LLM URL not configured'}), 400
 
     parsed = parse_with_llm(email_text, llm_url, system_prompt)
     if not parsed:
         app.logger.error("Draft ingest: LLM failed to parse email text: %s", email_text[:100])
+        log_pipeline_event('failed', 'webhook', email_preview=email_text, error='LLM failed to parse email')
         return jsonify({'success': False, 'error': 'Failed to parse email'}), 422
 
     app.logger.info("Draft ingest: LLM parsed — merchant='%s' amount=%.2f date=%s account='%s'", parsed['merchant'], parsed['amount'], parsed['date'], parsed['account'])
@@ -1012,6 +1126,7 @@ def api_ingest_draft():
         for d in drafts:
             if d.get('fingerprint') == fp:
                 app.logger.info("Draft ingest: skipped (duplicate fingerprint: %s)", fp)
+                log_pipeline_event('duplicate', 'webhook', email_preview=email_text, parsed=parsed)
                 return jsonify({'success': True, 'skipped': True, 'reason': 'Duplicate'}), 200
 
         draft = {
@@ -1032,15 +1147,18 @@ def api_ingest_draft():
         save_drafts(drafts)
 
     app.logger.info("Draft created: id=%s merchant='%s' amount=%.2f", draft['id'], draft['merchant'], draft['amount'])
-    return jsonify({'success': True, 'draft_id': draft['id']})
+    log_pipeline_event('success', 'webhook', email_preview=email_text, parsed=parsed, draft_id=draft['id'])
+    return jsonify({'success': True, 'draft_id': draft['id'], 'parsed': parsed})
 
 
 @app.route('/api/drafts/paste', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def api_paste_draft():
     """Parse pasted email text via LLM and store as draft."""
     config = load_email_config()
     if not config or not config.get('enabled') or not config.get('llm_url'):
+        log_pipeline_event('failed', 'paste', error='LLM not configured')
         return jsonify({'success': False, 'error': 'LLM not configured. Go to Settings to set up.'}), 400
 
     data = request.get_json(silent=True) or {}
@@ -1060,6 +1178,7 @@ def api_paste_draft():
 
     parsed = parse_with_llm(email_text, config['llm_url'], system_prompt)
     if not parsed:
+        log_pipeline_event('failed', 'paste', email_preview=email_text, error='LLM failed to parse email')
         return jsonify({'success': False, 'error': 'Could not parse the email text. Check your LLM configuration.'}), 422
 
     fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
@@ -1082,6 +1201,7 @@ def api_paste_draft():
         drafts.append(draft)
         save_drafts(drafts)
 
+    log_pipeline_event('success', 'paste', email_preview=email_text, parsed=parsed, draft_id=draft['id'])
     return jsonify({'success': True, 'draft_id': draft['id'], 'draft': draft})
 
 
@@ -1120,7 +1240,7 @@ def api_accept_draft(draft_id):
             return jsonify({'success': True, 'txn_id': txn_id})
         except Exception as e:
             app.logger.error("Draft accept failed: draft_id=%s error=%s", draft_id, e)
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'success': False, 'error': 'Failed to create transaction from draft'}), 400
 
 
 @app.route('/api/drafts/<int:draft_id>/reject', methods=['POST'])
@@ -1211,6 +1331,84 @@ def download_n8n_workflow():
     """Serve the n8n workflow template as a downloadable file."""
     from flask import send_from_directory
     return send_from_directory('static', 'n8n-email-workflow.json', as_attachment=True, download_name='n8n-email-workflow.json')
+
+
+@app.route('/api/pipeline/history', methods=['GET'])
+@login_required
+def api_pipeline_history():
+    """Return pipeline log entries, newest first."""
+    entries = load_pipeline_log()
+    entries.reverse()
+    # Optional filtering
+    status_filter = request.args.get('status')
+    if status_filter:
+        entries = [e for e in entries if e.get('status') == status_filter]
+    limit = request.args.get('limit', 50, type=int)
+    return jsonify(entries[:limit])
+
+
+@app.route('/api/pipeline/retry/<int:log_id>', methods=['POST'])
+@login_required
+def api_pipeline_retry(log_id):
+    """Retry a failed pipeline entry."""
+    entries = load_pipeline_log()
+    entry = next((e for e in entries if e.get('id') == log_id), None)
+    if not entry:
+        return jsonify({'success': False, 'error': 'Log entry not found'}), 404
+    if entry.get('status') not in ('failed',):
+        return jsonify({'success': False, 'error': 'Only failed entries can be retried'}), 400
+
+    email_text = entry.get('email_preview', '')
+    if not email_text:
+        return jsonify({'success': False, 'error': 'No email text to retry'}), 400
+
+    config = load_email_config()
+    if not config or not config.get('enabled') or not config.get('llm_url'):
+        return jsonify({'success': False, 'error': 'LLM not configured'}), 400
+
+    from email_parser import parse_with_llm, build_default_prompt
+
+    system_prompt = config.get('system_prompt', '').strip()
+    if not system_prompt:
+        system_prompt = build_default_prompt(config.get('account_mapping', {}))
+
+    parsed = parse_with_llm(email_text, config['llm_url'], system_prompt)
+    if not parsed:
+        log_pipeline_event('failed', 'retry', email_preview=email_text, error='LLM failed to parse on retry')
+        return jsonify({'success': False, 'error': 'LLM failed to parse again'}), 422
+
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    with _drafts_lock:
+        drafts = load_drafts()
+        draft = {
+            'id': get_next_draft_id(),
+            'amount': parsed['amount'],
+            'merchant': parsed['merchant'],
+            'date': parsed['date'],
+            'account': parsed['account'],
+            'category': parsed.get('category', 'Miscellaneous'),
+            'sub_category': '',
+            'type': parsed.get('type', 'Expense'),
+            'status': 'pending',
+            'raw_email_text': email_text[:500],
+            'created_at': datetime.now().isoformat(),
+            'fingerprint': fp
+        }
+        drafts.append(draft)
+        save_drafts(drafts)
+
+    log_pipeline_event('success', 'retry', email_preview=email_text, parsed=parsed, draft_id=draft['id'])
+    app.logger.info("Pipeline retry success: log_id=%s → draft_id=%s", log_id, draft['id'])
+    return jsonify({'success': True, 'draft_id': draft['id'], 'parsed': parsed})
+
+
+@app.route('/api/pipeline/clear', methods=['POST'])
+@login_required
+def api_pipeline_clear():
+    """Clear pipeline history."""
+    with _pipeline_lock:
+        save_pipeline_log([])
+    return jsonify({'success': True})
 
 
 @app.route('/api/settings/email', methods=['GET'])
@@ -1391,6 +1589,8 @@ def pwa_manifest():
 @app.route('/sw.js')
 def service_worker():
     sw_path = os.path.join(app.static_folder, 'sw.js')
+    if not os.path.exists(sw_path):
+        return Response('// sw.js not found', mimetype='application/javascript', status=404)
     with open(sw_path, 'r') as f:
         return Response(f.read(), mimetype='application/javascript',
                        headers={'Service-Worker-Allowed': '/', 'Cache-Control': 'no-cache'})
