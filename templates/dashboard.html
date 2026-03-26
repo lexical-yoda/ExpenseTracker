@@ -456,7 +456,16 @@
       }
     });
 
-    const numDays = Object.keys(daily).length || 1;
+    // Calculate total calendar days in the period (not just days with spending)
+    const dailyKeys = Object.keys(daily).sort();
+    let numDays = 1;
+    if (dailyKeys.length > 0) {
+      const firstDay = new Date(dailyKeys[0]);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const lastDay = today > new Date(dailyKeys[dailyKeys.length - 1]) ? today : new Date(dailyKeys[dailyKeys.length - 1]);
+      numDays = Math.max(1, Math.round((lastDay - firstDay) / 86400000) + 1);
+    }
     const avgDaily = totalExpense / numDays;
 
     const today = new Date().toISOString().slice(0, 10);
@@ -817,20 +826,31 @@
       window.location.href = '/manage?date=' + clickedDate;
     });
 
-    // Cumulative average chart
+    // Cumulative average chart — continuous date range including zero-spend days
     if (dailyDates.length > 0) {
-      let cumSum = 0;
+      // Build a continuous date range from first transaction to today
+      const firstDate = new Date(dailyDates[0]);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const endDate = today > new Date(dailyDates[dailyDates.length - 1]) ? today : new Date(dailyDates[dailyDates.length - 1]);
+
       const cumAvgDates = [];
       const cumAvgVals = [];
-      for (let i = 0; i < dailyDates.length; i++) {
-        cumSum += dailyVals[i];
-        cumAvgDates.push(dailyDates[i]);
-        cumAvgVals.push(Math.round(cumSum / (i + 1)));
+      let cumSum = 0;
+      let dayCount = 0;
+      const d = new Date(firstDate);
+      while (d <= endDate) {
+        const dateStr = d.toISOString().slice(0, 10);
+        dayCount++;
+        cumSum += daily[dateStr] || 0;
+        cumAvgDates.push(dateStr);
+        cumAvgVals.push(Math.round(cumSum / dayCount));
+        d.setDate(d.getDate() + 1);
       }
       Plotly.react('chart-cumavg', [{
         x: cumAvgDates, y: cumAvgVals, type: 'scatter', mode: 'lines+markers',
         line: { color: c.ACCENT, width: 2, shape: 'spline' },
-        marker: { color: c.ACCENT, size: 5 },
+        marker: { color: c.ACCENT, size: Math.min(5, Math.max(2, 100 / cumAvgDates.length)) },
         fill: 'tozeroy',
         fillcolor: c.FILL_ALPHA,
         hovertemplate: '<b>%{x}</b><br>Avg: ₹%{y:,.0f}/day<extra></extra>',
