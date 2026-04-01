@@ -316,6 +316,7 @@
       <span id="nw-progress-label">0%</span>
       <span id="nw-remaining-label">—</span>
     </div>
+    <div id="nw-breakdown" style="margin-top:16px;"></div>
   </div>
 
   <!-- Charts (two-column on desktop) -->
@@ -706,12 +707,29 @@
 
   function renderNetWorth(investmentPrices) {
     let netWorth = 0;
+    let savingsTotal = 0;
+    let stocksTotal = 0;
+    let fdTotal = 0;
+    let ccDebt = 0;
+
     balancesData.forEach(b => {
-      if (b.type === 'savings') netWorth += (b.current_balance || 0);
-      else if (b.type === 'credit') netWorth -= (b.accumulated || 0);
+      if (b.type === 'savings') {
+        savingsTotal += (b.current_balance || 0);
+        netWorth += (b.current_balance || 0);
+      } else if (b.type === 'credit') {
+        ccDebt += (b.accumulated || 0);
+        netWorth -= (b.accumulated || 0);
+      }
     });
+
     investmentPrices.forEach(p => {
-      if (p.current_value !== null) netWorth += p.current_value;
+      const val = p.current_value !== null ? p.current_value : (p.invested || 0);
+      if (p.subtype === 'fd') {
+        fdTotal += val;
+      } else {
+        stocksTotal += val;
+      }
+      netWorth += val;
     });
 
     const el = document.getElementById('net-worth');
@@ -731,6 +749,31 @@
     document.getElementById('nw-progress-bar').style.background = progress >= 100 ? 'var(--success)' : 'var(--accent)';
     document.getElementById('nw-progress-label').textContent = Math.round(progress) + '% there';
     document.getElementById('nw-remaining-label').textContent = remaining > 0 ? fmt(remaining) + ' to go' : 'Goal reached!';
+
+    // Breakdown by category
+    const categories = [
+      { label: 'Savings', value: savingsTotal, color: 'var(--success)', positive: true },
+      { label: 'Stocks / ETFs', value: stocksTotal, color: 'var(--accent)', positive: true },
+      { label: 'Fixed Deposits', value: fdTotal, color: '#d29922', positive: true },
+      { label: 'Credit Card Debt', value: ccDebt, color: 'var(--danger)', positive: false },
+    ].filter(c => Math.abs(c.value) > 0);
+
+    const maxVal = Math.max(...categories.map(c => Math.abs(c.value)), 1);
+    const breakdownEl = document.getElementById('nw-breakdown');
+    if (breakdownEl && categories.length) {
+      breakdownEl.innerHTML = categories.map(c => {
+        const barWidth = Math.max(3, (Math.abs(c.value) / maxVal) * 100);
+        const displayVal = c.positive ? fmt(c.value) : '-' + fmt(c.value);
+        return `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <div style="width:120px;font-size:0.75rem;color:var(--muted);text-align:right;flex-shrink:0;">${c.label}</div>
+            <div style="flex:1;background:var(--border);border-radius:4px;height:8px;overflow:hidden;">
+              <div style="width:${barWidth}%;height:100%;background:${c.color};border-radius:4px;transition:width 0.6s ease;"></div>
+            </div>
+            <div style="width:100px;font-size:0.8rem;font-weight:600;color:${c.color};text-align:right;flex-shrink:0;">${displayVal}</div>
+          </div>`;
+      }).join('');
+    }
   }
 
   // ── Render recent transactions ──
