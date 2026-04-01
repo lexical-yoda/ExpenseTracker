@@ -303,7 +303,33 @@ def _update_transaction_inner(txn_id, data):
         old_date = old_date.date()
 
     if (old_date.year, old_date.month) != (new_date.year, new_date.month):
-        raise ValueError('Cannot change date to a different month. Delete and re-add instead.')
+        # Cross-month edit: delete from old sheet and add to new sheet
+        parent_id = ws.cell(row=row_num, column=COLUMNS['parent_id']).value
+        ws.delete_rows(row_num)
+        save_workbook(wb)
+        _invalidate_cache()
+
+        # Re-add to the correct month sheet
+        wb2, ws2 = ensure_month_sheet(new_date.year, new_date.month)
+        next_row = ws2.max_row + 1
+        ws2.cell(row=next_row, column=COLUMNS['date']).value = new_date
+        ws2.cell(row=next_row, column=COLUMNS['txn_id']).value = txn_id
+        ws2.cell(row=next_row, column=COLUMNS['description']).value = sanitize_cell(data['description'])
+        ws2.cell(row=next_row, column=COLUMNS['category']).value = sanitize_cell(data['category'])
+        ws2.cell(row=next_row, column=COLUMNS['sub_category']).value = sanitize_cell(data.get('sub_category', ''))
+        ws2.cell(row=next_row, column=COLUMNS['account']).value = sanitize_cell(data['account'])
+        ws2.cell(row=next_row, column=COLUMNS['amount']).value = float(data['amount'])
+        ws2.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
+        ws2.cell(row=next_row, column=COLUMNS['txn_type']).value = data.get('type', 'Expense')
+        if 'track' in data:
+            ws2.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if data['track'] else 'No'
+        if 'units' in data and data['units'] is not None:
+            ws2.cell(row=next_row, column=COLUMNS['units']).value = float(data['units'])
+        if parent_id is not None:
+            ws2.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
+        save_workbook(wb2)
+        _invalidate_cache()
+        return get_transaction_by_id(txn_id)
 
     ws.cell(row=row_num, column=COLUMNS['date']).value = new_date
     ws.cell(row=row_num, column=COLUMNS['description']).value = sanitize_cell(data['description'])
