@@ -758,11 +758,12 @@
       { label: 'Credit Card Debt', value: ccDebt, color: 'var(--danger)', positive: false },
     ].filter(c => Math.abs(c.value) > 0);
 
-    const maxVal = Math.max(...categories.map(c => Math.abs(c.value)), 1);
+    const totalPositive = categories.filter(c => c.positive).reduce((s, c) => s + c.value, 0);
     const breakdownEl = document.getElementById('nw-breakdown');
     if (breakdownEl && categories.length) {
       breakdownEl.innerHTML = categories.map(c => {
-        const barWidth = Math.max(3, (Math.abs(c.value) / maxVal) * 100);
+        const pct = totalPositive > 0 ? (Math.abs(c.value) / totalPositive) * 100 : 0;
+        const barWidth = Math.max(3, pct);
         const displayVal = c.positive ? fmt(c.value) : '-' + fmt(c.value);
         return `
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
