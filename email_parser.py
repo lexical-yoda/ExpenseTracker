@@ -6,6 +6,7 @@ No Flask dependencies — can be tested standalone.
 
 import re
 import json
+import math
 import html as html_module
 import urllib.request
 import urllib.error
@@ -93,8 +94,8 @@ def parse_with_llm(email_text: str, llm_url: str, system_prompt: str, timeout: i
             if json_match:
                 parsed = json.loads(json_match.group(1))
             else:
-                # Try finding a JSON object anywhere in the response
-                obj_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+                # Try finding a JSON object anywhere in the response (supports nested braces)
+                obj_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
                 if obj_match:
                     parsed = json.loads(obj_match.group())
                 else:
@@ -123,9 +124,9 @@ def _validate_parsed(parsed: dict) -> bool:
     if not isinstance(parsed, dict):
         return False
 
-    # Amount must be a positive number
+    # Amount must be a positive finite number
     amount = parsed.get('amount')
-    if not isinstance(amount, (int, float)) or amount <= 0:
+    if not isinstance(amount, (int, float)) or not math.isfinite(amount) or amount <= 0:
         logger.warning("Invalid amount: %s", amount)
         return False
 
@@ -149,6 +150,11 @@ def _validate_parsed(parsed: dict) -> bool:
     if not isinstance(parsed.get('merchant'), str) or not parsed['merchant'].strip():
         logger.warning("Missing or empty merchant")
         return False
+
+    # Type must be Expense or Income (default to Expense if missing/invalid)
+    valid_types = ('Expense', 'Income')
+    if parsed.get('type') not in valid_types:
+        parsed['type'] = 'Expense'
 
     return True
 

@@ -26,6 +26,9 @@ AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
 
 
 def reset_password(new_password):
+    if len(new_password) < 6:
+        print("Error: Password must be at least 6 characters.")
+        sys.exit(1)
     if not os.path.exists(AUTH_FILE):
         print(f"Error: {AUTH_FILE} not found. Run the app first to complete setup.")
         sys.exit(1)

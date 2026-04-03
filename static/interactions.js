@@ -239,13 +239,11 @@ if ('serviceWorker' in navigator) {
 
 // ── 7. Relative timestamps ──
 function timeAgo(dateStr) {
-  const date = new Date(dateStr + 'T12:00:00'); // Assume noon to avoid timezone issues
-  const now = new Date();
-  const diffMs = now - date;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHour = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHour / 24);
+  // Compare calendar dates to avoid timezone/time-of-day issues
+  const target = new Date(dateStr + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDay = Math.round((today - target) / 86400000);
 
   if (diffDay === 0) return 'Today';
   if (diffDay === 1) return 'Yesterday';

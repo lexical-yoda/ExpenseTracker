@@ -465,6 +465,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
 <script>
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
   const accountNames = {{ accounts|tojson }};
+  function esc(s) { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
 
   function getAccountMapping() {
     const mapping = {};
@@ -478,7 +479,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
 
   function addMappingRow() {
     const tbody = document.getElementById('mapping-body');
-    const acctOptions = accountNames.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+    const acctOptions = accountNames.map(a => `<option value="${esc(a.name)}">${esc(a.name)}</option>`).join('');
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="text" class="mapping-key" placeholder='e.g., "account 1234"'></td>
@@ -541,7 +542,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     const data = await resp.json();
     if (data.success) {
       el.className = 'test-result success';
-      el.innerHTML = '<strong>' + data.message + '</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + JSON.stringify(data.parsed, null, 2) + '</pre><br><span style="font-size:0.8rem;color:var(--muted);">Draft #' + data.draft_id + ' created. Check the Manage page to review it.</span>';
+      el.innerHTML = '<strong>' + esc(data.message) + '</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + esc(JSON.stringify(data.parsed, null, 2)) + '</pre><br><span style="font-size:0.8rem;color:var(--muted);">Draft #' + esc(String(data.draft_id)) + ' created. Check the Manage page to review it.</span>';
     } else {
       el.className = 'test-result error';
       el.textContent = data.error;
@@ -602,11 +603,6 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
         container.innerHTML = '<p style="color:var(--muted); text-align:center;">No pipeline activity yet.</p>';
         return;
       }
-      const esc = (s) => {
-        const d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-      };
       const statusBadge = (s) => {
         const safe = esc(s);
         const colors = { success: 'var(--success)', failed: 'var(--danger)', skipped: 'var(--muted)', duplicate: 'var(--cc)', retry: 'var(--accent)' };
@@ -639,7 +635,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
       html += '</tbody></table>';
       container.innerHTML = html;
     } catch (err) {
-      container.innerHTML = `<p style="color:var(--danger);">Failed to load: ${err.message}</p>`;
+      container.innerHTML = `<p style="color:var(--danger);">Failed to load: ${esc(err.message)}</p>`;
     }
   }
 

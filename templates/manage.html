@@ -1331,7 +1331,7 @@
             const dateParts = payload.date.split('-');
             const unitsHtml = payload.units ? ` <span style="font-size:0.65rem;color:var(--muted)">(${esc(String(payload.units))} units)</span>` : '';
             const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-            const dayName = dayNames[new Date(payload.date).getDay()];
+            const dayName = dayNames[new Date(payload.date + 'T12:00:00').getDay()];
             const dayLabel = `${esc(dayName)}, ${esc(dateParts[2])}/${esc(dateParts[1])}/${esc(dateParts[0])}`;
 
             const existingDayLabels = txnList.querySelectorAll('.day-label');
@@ -1917,10 +1917,10 @@
 
   function renderDraftCard(d) {
     const catOptions = Object.keys(categoriesList).map(c =>
-      `<option value="${c}" ${c === d.category ? 'selected' : ''}>${c}</option>`
+      `<option value="${escAttr(c)}" ${c === d.category ? 'selected' : ''}>${esc(c)}</option>`
     ).join('');
     const acctOptions = accountsList.map(a =>
-      `<option value="${a.name}" ${a.name === d.account ? 'selected' : ''}>${a.name}</option>`
+      `<option value="${escAttr(a.name)}" ${a.name === d.account ? 'selected' : ''}>${esc(a.name)}</option>`
     ).join('');
     return `
       <div class="draft-card" id="draft-${d.id}">
@@ -1936,7 +1936,7 @@
         </div>
         <div class="draft-edit-row" id="draft-edit-${d.id}">
           <label style="font-size:0.75rem;color:var(--muted);width:100%">Merchant</label>
-          <input type="text" id="de-merchant-${d.id}" value="${esc(d.merchant)}" placeholder="Merchant">
+          <input type="text" id="de-merchant-${d.id}" value="${escAttr(d.merchant)}" placeholder="Merchant">
           <label style="font-size:0.75rem;color:var(--muted)">Amount</label>
           <input type="number" id="de-amount-${d.id}" value="${d.amount}" step="0.01" placeholder="Amount">
           <label style="font-size:0.75rem;color:var(--muted)">Date</label>
@@ -1957,6 +1957,7 @@
   }
 
   function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   function toggleDraftEdit(id) {
     const row = document.getElementById(`draft-edit-${id}`);
@@ -1977,7 +1978,7 @@
       document.getElementById(`draft-${id}`)?.remove();
       showToast('Transaction saved');
       updateDraftCount(-1);
-      loadTransactions();  // Bug #2: refresh transaction list
+      setTimeout(() => location.reload(), 500);  // Bug #2: refresh transaction list
     } else {
       showToast(data.error || 'Failed to accept', 'error');
     }
@@ -2027,7 +2028,7 @@
       const banner = document.getElementById('draft-banner');
       if (banner) banner.style.display = 'none';
       document.getElementById('draft-section').classList.remove('open');
-      loadTransactions();  // Refresh transaction list
+      setTimeout(() => location.reload(), 500);  // Refresh transaction list
     }
   }
 

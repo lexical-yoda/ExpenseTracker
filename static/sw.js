@@ -1,4 +1,5 @@
-const CACHE_NAME = 'em-v3';
+const CACHE_VERSION = 4;
+const CACHE_NAME = 'em-v' + CACHE_VERSION;
 const PRECACHE = [
   '/static/themes.css',
   '/static/theme.js',
@@ -24,21 +25,29 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-// Fetch: network-first for HTML/API, cache-first for static assets
+// Fetch: stale-while-revalidate for static, network-first for everything else
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
   // Skip non-GET requests
   if (e.request.method !== 'GET') return;
 
-  // Static assets: cache-first
+  // Static assets: stale-while-revalidate (serve cached, update in background)
   if (url.pathname.startsWith('/static/')) {
     e.respondWith(
-      caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
-        const clone = resp.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
-        return resp;
-      }))
+      caches.open(CACHE_NAME).then(cache =>
+        cache.match(e.request).then(cached => {
+          const fetchPromise = fetch(e.request).then(resp => {
+            // Only cache successful responses (prevent cache poisoning)
+            if (resp.ok) {
+              cache.put(e.request, resp.clone());
+            }
+            return resp;
+          }).catch(() => cached); // Fall back to cache on network failure
+
+          return cached || fetchPromise;
+        })
+      )
     );
     return;
   }

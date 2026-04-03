@@ -410,22 +410,26 @@
     let cutoff = null;
     let cutoffEnd = null;
 
+    // Use string comparison (YYYY-MM-DD) to avoid UTC parsing issues
+    let cutoffStr = null;
+    let cutoffEndStr = null;
+
     if (filter === 'month') {
-      cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+      cutoffStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
     } else if (filter === '3months') {
-      cutoff = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const d3 = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      cutoffStr = d3.toLocaleDateString('en-CA');
     } else if (filter === 'ytd') {
-      cutoff = new Date(now.getFullYear(), 0, 1);
+      cutoffStr = `${now.getFullYear()}-01-01`;
     } else if (filter === 'custom' && customFrom && customTo) {
-      cutoff = new Date(customFrom);
-      cutoffEnd = new Date(customTo + 'T23:59:59');
+      cutoffStr = customFrom;
+      cutoffEndStr = customTo;
     }
 
     function inRange(dateStr) {
-      if (!cutoff) return true;
-      const d = new Date(dateStr);
-      if (d < cutoff) return false;
-      if (cutoffEnd && d > cutoffEnd) return false;
+      if (!cutoffStr) return true;
+      if (dateStr < cutoffStr) return false;
+      if (cutoffEndStr && dateStr > cutoffEndStr) return false;
       return true;
     }
 
@@ -461,15 +465,15 @@
     const dailyKeys = Object.keys(daily).sort();
     let numDays = 1;
     if (dailyKeys.length > 0) {
-      const firstDay = new Date(dailyKeys[0]);
+      const firstDay = new Date(dailyKeys[0] + 'T00:00:00');
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const lastDay = today > new Date(dailyKeys[dailyKeys.length - 1]) ? today : new Date(dailyKeys[dailyKeys.length - 1]);
+      const lastDay = today > new Date(dailyKeys[dailyKeys.length - 1] + 'T00:00:00') ? today : new Date(dailyKeys[dailyKeys.length - 1] + 'T00:00:00');
       numDays = Math.max(1, Math.round((lastDay - firstDay) / 86400000) + 1);
     }
     const avgDaily = totalExpense / numDays;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('en-CA');
     let spentToday = 0;
     (rawSummary.transactions || []).forEach(t => {
       if (!t.parent_id && t.date === today && t.type === 'Expense' && t.track !== false) {
@@ -613,9 +617,9 @@
       cycleEnd = new Date(currentYear, currentMonth, billingDate - 1);
     }
 
-    const cycleStartStr = cycleStart.toISOString().slice(0, 10);
-    const cycleEndStr = cycleEnd.toISOString().slice(0, 10);
-    const todayStr = now.toISOString().slice(0, 10);
+    const cycleStartStr = cycleStart.toLocaleDateString('en-CA');
+    const cycleEndStr = cycleEnd.toLocaleDateString('en-CA');
+    const todayStr = now.toLocaleDateString('en-CA');
 
     // Sum CC expenses in current billing cycle
     let cycleSpend = 0;
@@ -656,8 +660,8 @@
       prevEnd = new Date(currentYear, currentMonth - 1, billingDate - 1);
     }
 
-    const prevStartStr = prevStart.toISOString().slice(0, 10);
-    const prevEndStr = prevEnd.toISOString().slice(0, 10);
+    const prevStartStr = prevStart.toLocaleDateString('en-CA');
+    const prevEndStr = prevEnd.toLocaleDateString('en-CA');
 
     let prevSpend = 0;
     (rawSummary.transactions || []).forEach(t => {
@@ -873,10 +877,10 @@
     // Cumulative average chart — continuous date range including zero-spend days
     if (dailyDates.length > 0) {
       // Build a continuous date range from first transaction to today
-      const firstDate = new Date(dailyDates[0]);
+      const firstDate = new Date(dailyDates[0] + 'T00:00:00');
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const endDate = today > new Date(dailyDates[dailyDates.length - 1]) ? today : new Date(dailyDates[dailyDates.length - 1]);
+      const endDate = today > new Date(dailyDates[dailyDates.length - 1] + 'T00:00:00') ? today : new Date(dailyDates[dailyDates.length - 1] + 'T00:00:00');
 
       const cumAvgDates = [];
       const cumAvgVals = [];
@@ -884,7 +888,7 @@
       let dayCount = 0;
       const d = new Date(firstDate);
       while (d <= endDate) {
-        const dateStr = d.toISOString().slice(0, 10);
+        const dateStr = d.toLocaleDateString('en-CA');
         dayCount++;
         cumSum += daily[dateStr] || 0;
         cumAvgDates.push(dateStr);

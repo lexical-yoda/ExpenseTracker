@@ -243,9 +243,9 @@ def add_transaction(date_str, description, category, sub_category, account, amou
 
         save_workbook(wb)
 
-    # Auto-update investment account units & balance
-    if units is not None and not parent_id:
-        _update_investment_account(account, amount, units, txn_type)
+        # Auto-update investment account units & balance (inside lock for consistency)
+        if units is not None and not parent_id:
+            _update_investment_account(account, amount, units, txn_type)
 
     return txn_id
 
@@ -266,8 +266,18 @@ def _update_investment_account(account_name, amount, units, txn_type):
                 elif txn_type == 'Expense':
                     acct['units'] = max(0, acct.get('units', 0) - units)
                     acct['balance'] = max(0, acct.get('balance', 0) - amount)
-                with open(ACCOUNTS_FILE, 'w') as f:
-                    json.dump(accounts, f, indent=2)
+                import tempfile
+                fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(ACCOUNTS_FILE), suffix='.tmp')
+                try:
+                    with os.fdopen(fd, 'w') as f:
+                        json.dump(accounts, f, indent=2)
+                    os.replace(tmp_path, ACCOUNTS_FILE)
+                except Exception:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
                 break
 
 
@@ -301,6 +311,10 @@ def _update_transaction_inner(txn_id, data):
     new_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
     if isinstance(old_date, datetime):
         old_date = old_date.date()
+    elif isinstance(old_date, str):
+        old_date = datetime.strptime(old_date, '%Y-%m-%d').date()
+    elif old_date is None:
+        raise ValueError(f'Transaction {txn_id} has no date')
 
     if (old_date.year, old_date.month) != (new_date.year, new_date.month):
         # Cross-month edit: delete from old sheet and add to new sheet
@@ -311,7 +325,9 @@ def _update_transaction_inner(txn_id, data):
 
         # Re-add to the correct month sheet
         wb2, ws2 = ensure_month_sheet(new_date.year, new_date.month)
-        next_row = ws2.max_row + 1
+        next_row = DATA_START
+        while ws2.cell(row=next_row, column=COLUMNS['txn_id']).value is not None:
+            next_row += 1
         ws2.cell(row=next_row, column=COLUMNS['date']).value = new_date
         ws2.cell(row=next_row, column=COLUMNS['txn_id']).value = txn_id
         ws2.cell(row=next_row, column=COLUMNS['description']).value = sanitize_cell(data['description'])
@@ -362,7 +378,13 @@ def _delete_transaction_inner(txn_id):
     sheet_name, row_num = result
     ws = wb[sheet_name]
 
+    # Capture investment data before deletion for reversal
     parent_id = ws.cell(row=row_num, column=COLUMNS['parent_id']).value
+    units_val = ws.cell(row=row_num, column=COLUMNS['units']).value if COLUMNS['units'] - 1 < ws.max_column else None
+    txn_amount = ws.cell(row=row_num, column=COLUMNS['amount']).value
+    txn_type = ws.cell(row=row_num, column=COLUMNS['txn_type']).value or 'Expense'
+    txn_account = ws.cell(row=row_num, column=COLUMNS['account']).value
+
     rows_to_delete = [row_num]
     deleted_ids = [txn_id]
 
@@ -391,6 +413,18 @@ def _delete_transaction_inner(txn_id):
         ws.delete_rows(r, 1)
 
     save_workbook(wb)
+
+    # Reverse investment account update if this was a parent with units
+    if parent_id is None and units_val is not None and txn_account:
+        try:
+            units = float(units_val)
+            amount = float(txn_amount or 0)
+            # Reverse: if original was Income (added units), now subtract; vice versa
+            reverse_type = 'Expense' if txn_type == 'Income' else 'Income'
+            _update_investment_account(txn_account, amount, units, reverse_type)
+        except (ValueError, TypeError):
+            pass
+
     return deleted_ids
 
 

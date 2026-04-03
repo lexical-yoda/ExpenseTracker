@@ -46,9 +46,9 @@ def _get_or_create_secret_key():
     for path in [env_file, data_env]:
         try:
             os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-            with open(path, 'w') as f:
+            with open(path, 'a') as f:
                 if path == env_file:
-                    f.write(f"SECRET_KEY={key}\n")
+                    f.write(f"\nSECRET_KEY={key}\n")
                 else:
                     f.write(key)
             return key
@@ -114,8 +114,7 @@ def save_auth(username, password_hash, extra=None):
                 data[k] = v
     if extra:
         data.update(extra)
-    with open(AUTH_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    _atomic_json_write(AUTH_FILE, data)
     os.chmod(AUTH_FILE, 0o600)
 
 
@@ -279,7 +278,7 @@ def setup():
     return render_template('setup.html', error=error)
 
 
-@app.route('/logout', methods=['GET', 'POST'])
+@app.route('/logout', methods=['POST'])
 @login_required
 def logout():
     logout_user()
@@ -299,9 +298,7 @@ def load_categories():
         return {}
 
 def save_categories(data):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(CATEGORIES_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    _atomic_json_write(CATEGORIES_FILE, data)
 
 
 # ── Accounts ──────────────────────────────────────────────────────────────────
@@ -317,9 +314,7 @@ def load_accounts():
         return []
 
 def save_accounts(data):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(ACCOUNTS_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    _atomic_json_write(ACCOUNTS_FILE, data)
 
 
 # ── Draft helpers ────────────────────────────────────────────────────────────
@@ -329,19 +324,39 @@ _drafts_lock = threading.Lock()
 def load_drafts():
     if not os.path.exists(DRAFTS_FILE):
         return []
-    with open(DRAFTS_FILE, 'r') as f:
-        return json.load(f)
+    try:
+        with open(DRAFTS_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        app.logger.error("Corrupt drafts.json — returning empty")
+        return []
+
+def _atomic_json_write(filepath, data):
+    """Write JSON atomically: write to temp file, then rename."""
+    import tempfile
+    os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(filepath), suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, filepath)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 def save_drafts(data):
     os.makedirs(DATA_DIR, exist_ok=True)
     # Prune accepted/rejected drafts older than 30 days
     cutoff = (datetime.now() - timedelta(days=30)).isoformat()
     data = [d for d in data if d.get('status') == 'pending' or d.get('created_at', '') > cutoff]
-    with open(DRAFTS_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    _atomic_json_write(DRAFTS_FILE, data)
 
-def get_next_draft_id():
-    drafts = load_drafts()
+def get_next_draft_id(drafts=None):
+    if drafts is None:
+        drafts = load_drafts()
     if not drafts:
         return 1
     return max(d.get('id', 0) for d in drafts) + 1
@@ -362,9 +377,7 @@ def load_email_config():
         return None
 
 def save_email_config(config):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(EMAIL_CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+    _atomic_json_write(EMAIL_CONFIG_FILE, config)
 
 def get_default_email_config():
     return {
@@ -392,11 +405,9 @@ def load_pipeline_log():
         return []
 
 def save_pipeline_log(entries):
-    os.makedirs(DATA_DIR, exist_ok=True)
     # Keep only last MAX_PIPELINE_LOG entries
     entries = entries[-MAX_PIPELINE_LOG:]
-    with open(PIPELINE_LOG_FILE, 'w') as f:
-        json.dump(entries, f, indent=2)
+    _atomic_json_write(PIPELINE_LOG_FILE, entries)
 
 def log_pipeline_event(status, source, email_preview='', parsed=None, error=None, draft_id=None):
     """Log an email parsing attempt to the pipeline history."""
@@ -595,7 +606,7 @@ def api_delete_transaction(txn_id):
 @app.route('/api/transactions/<int:txn_id>/track', methods=['PATCH'])
 @login_required
 def api_toggle_track(txn_id):
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     track = data.get('track', True)
     try:
         txn = get_transaction_by_id(txn_id)
@@ -741,8 +752,8 @@ def api_update_account(account_id):
 
         save_accounts(accounts)
 
-    if old_name != new_name:
-        rename_account_in_sheets(old_name, new_name)
+        if old_name != new_name:
+            rename_account_in_sheets(old_name, new_name)
 
     return jsonify({'success': True, 'account': acct})
 
@@ -853,9 +864,7 @@ def api_update_nw_goal():
     auth = load_auth()
     if auth:
         auth['nw_goal_increment'] = increment
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(AUTH_FILE, 'w') as f:
-            json.dump(auth, f, indent=2)
+        _atomic_json_write(AUTH_FILE, auth)
         os.chmod(AUTH_FILE, 0o600)
     return jsonify({'success': True, 'increment': increment})
 
@@ -956,9 +965,10 @@ def api_export_csv():
     writer = csv.writer(output)
     writer.writerow(['Date', 'ID', 'Description', 'Category', 'Sub-Category', 'Account', 'Amount', 'Type', 'Track', 'Units', 'Parent ID'])
     def strip_sanitize_prefix(s):
-        """Remove the single-quote prefix added by sanitize_cell for CSV export."""
-        if isinstance(s, str) and s.startswith("'") and len(s) > 1 and s[1] in ('=', '+', '-', '@'):
-            return s[1:]
+        """Remove the single-quote prefix added by sanitize_cell for CSV export, keeping formula injection protection."""
+        if isinstance(s, str) and s.startswith("'") and len(s) > 1 and s[1] in ('=', '+', '-', '@', '|', '\t'):
+            # Strip the quote but re-prefix with a space to prevent CSV formula injection
+            return ' ' + s[1:]
         return s
 
     for t in transactions:
@@ -1130,7 +1140,7 @@ def api_ingest_draft():
                 return jsonify({'success': True, 'skipped': True, 'reason': 'Duplicate'}), 200
 
         draft = {
-            'id': get_next_draft_id(),
+            'id': get_next_draft_id(drafts),
             'amount': parsed['amount'],
             'merchant': parsed['merchant'],
             'date': parsed['date'],
@@ -1185,7 +1195,7 @@ def api_paste_draft():
     with _drafts_lock:
         drafts = load_drafts()
         draft = {
-            'id': get_next_draft_id(),
+            'id': get_next_draft_id(drafts),
             'amount': parsed['amount'],
             'merchant': parsed['merchant'],
             'date': parsed['date'],
@@ -1269,9 +1279,18 @@ def api_update_draft(draft_id):
         if not draft:
             return jsonify({'success': False, 'error': 'Draft not found'}), 404
 
-        for field in ('merchant', 'amount', 'date', 'account', 'category', 'sub_category', 'type'):
+        for field in ('merchant', 'date', 'account', 'category', 'sub_category', 'type'):
             if field in data:
                 draft[field] = data[field]
+
+        # Validate and convert amount
+        if 'amount' in data:
+            try:
+                draft['amount'] = float(data['amount'])
+                if draft['amount'] <= 0:
+                    return jsonify({'success': False, 'error': 'Amount must be positive'}), 400
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': 'Invalid amount'}), 400
 
         # Validate type
         if draft.get('type') not in ('Expense', 'Income', 'Transfer'):
@@ -1381,7 +1400,7 @@ def api_pipeline_retry(log_id):
     with _drafts_lock:
         drafts = load_drafts()
         draft = {
-            'id': get_next_draft_id(),
+            'id': get_next_draft_id(drafts),
             'amount': parsed['amount'],
             'merchant': parsed['merchant'],
             'date': parsed['date'],
@@ -1508,7 +1527,7 @@ def api_test_webhook():
     with _drafts_lock:
         drafts = load_drafts()
         draft = {
-            'id': get_next_draft_id(),
+            'id': get_next_draft_id(drafts),
             'amount': parsed['amount'],
             'merchant': parsed['merchant'],
             'date': parsed['date'],
