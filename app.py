@@ -15,7 +15,8 @@ import urllib.error
 from spreadsheet import (
     get_all_transactions, add_transaction, get_transaction_by_id,
     get_monthly_summary, update_transaction, delete_transaction,
-    rename_account_in_sheets, compute_account_balances, _accounts_lock
+    rename_account_in_sheets, compute_account_balances, compute_emi_schedule,
+    _accounts_lock
 )
 from datetime import date, datetime, timedelta
 
@@ -527,6 +528,7 @@ def api_add_transaction():
         return jsonify({'success': False, 'error': 'Amount must be positive'}), 400
     try:
         units = float(data['units']) if data.get('units') else None
+        emi_id = int(data['emi_id']) if data.get('emi_id') else None
         txn_id = add_transaction(
             date_str=data['date'],
             description=data['description'],
@@ -537,7 +539,8 @@ def api_add_transaction():
             parent_id=data.get('parent_id') or None,
             txn_type=txn_type,
             track=data.get('track', True),
-            units=units
+            units=units,
+            emi_id=emi_id
         )
         app.logger.info("Transaction created: id=%s desc='%s' amount=%.2f account='%s' type=%s", txn_id, data['description'], float(data['amount']), data['account'], txn_type)
         return jsonify({'success': True, 'id': txn_id})
@@ -670,8 +673,8 @@ def api_add_account():
 
     if not name:
         return jsonify({'success': False, 'error': 'Account name required'}), 400
-    if acct_type not in ('savings', 'credit', 'investment'):
-        return jsonify({'success': False, 'error': 'Type must be savings, credit, or investment'}), 400
+    if acct_type not in ('savings', 'credit', 'investment', 'emi'):
+        return jsonify({'success': False, 'error': 'Type must be savings, credit, investment, or emi'}), 400
 
     with _accounts_lock:
         accounts = load_accounts()
@@ -700,6 +703,19 @@ def api_add_account():
                 else:
                     new_account['ticker'] = data.get('ticker', '').strip()
                     new_account['units'] = float(data.get('units', 0))
+            elif acct_type == 'emi':
+                new_account['principal'] = float(data.get('principal', 0))
+                new_account['interest_rate'] = float(data.get('interest_rate', 0))
+                new_account['tenure_months'] = int(data.get('tenure_months', 0))
+                new_account['booking_date'] = data.get('booking_date', '')
+                new_account['first_installment_date'] = data.get('first_installment_date', '')
+                linked = data.get('linked_account_id')
+                if linked:
+                    new_account['linked_account_id'] = int(linked)
+                if new_account['principal'] <= 0 or new_account['tenure_months'] <= 0:
+                    return jsonify({'success': False, 'error': 'Principal and tenure must be positive'}), 400
+                if not new_account['first_installment_date']:
+                    return jsonify({'success': False, 'error': 'First installment date is required'}), 400
         except (ValueError, TypeError) as e:
             return jsonify({'success': False, 'error': 'Invalid numeric value in account fields'}), 400
 
@@ -747,6 +763,18 @@ def api_update_account(account_id):
                 else:
                     acct['ticker'] = data.get('ticker', acct.get('ticker', '')).strip()
                     acct['units'] = float(data.get('units', acct.get('units', 0)))
+            elif acct['type'] == 'emi':
+                acct['principal'] = float(data.get('principal', acct.get('principal', 0)))
+                acct['interest_rate'] = float(data.get('interest_rate', acct.get('interest_rate', 0)))
+                acct['tenure_months'] = int(data.get('tenure_months', acct.get('tenure_months', 0)))
+                acct['booking_date'] = data.get('booking_date', acct.get('booking_date', ''))
+                acct['first_installment_date'] = data.get('first_installment_date', acct.get('first_installment_date', ''))
+                if 'linked_account_id' in data:
+                    linked = data.get('linked_account_id')
+                    if linked:
+                        acct['linked_account_id'] = int(linked)
+                    else:
+                        acct.pop('linked_account_id', None)
         except (ValueError, TypeError):
             return jsonify({'success': False, 'error': 'Invalid numeric value in account fields'}), 400
 
@@ -768,13 +796,49 @@ def api_delete_account(account_id):
             return jsonify({'success': False, 'error': 'Account not found'}), 404
 
         transactions = get_all_transactions()
-        in_use = any(t['account'] == acct['name'] for t in transactions)
-        if in_use:
-            return jsonify({'success': False, 'error': 'Cannot delete — transactions use this account'}), 400
+        if acct['type'] == 'emi':
+            in_use = any(t.get('emi_id') == account_id for t in transactions)
+            if in_use:
+                return jsonify({'success': False, 'error': 'Cannot delete — installments reference this EMI'}), 400
+        else:
+            in_use = any(t['account'] == acct['name'] for t in transactions)
+            if in_use:
+                return jsonify({'success': False, 'error': 'Cannot delete — transactions use this account'}), 400
 
         accounts = [a for a in accounts if a['id'] != account_id]
         save_accounts(accounts)
     return jsonify({'success': True})
+
+
+@app.route('/api/accounts/<int:account_id>/schedule', methods=['GET'])
+@login_required
+def api_account_schedule(account_id):
+    """Return the full EMI schedule for an EMI account with paid/upcoming flags."""
+    accounts = load_accounts()
+    acct = next((a for a in accounts if a['id'] == account_id), None)
+    if not acct or acct.get('type') != 'emi':
+        return jsonify({'success': False, 'error': 'EMI account not found'}), 404
+
+    schedule = compute_emi_schedule(
+        acct.get('principal', 0),
+        acct.get('interest_rate', 0),
+        acct.get('tenure_months', 0),
+        acct.get('first_installment_date', ''),
+    )
+
+    # Mark paid installments by finding transactions with matching emi_id, date-sorted
+    paid_txns = sorted(
+        [t for t in get_all_transactions() if not t['parent_id'] and t.get('emi_id') == account_id],
+        key=lambda t: t['date']
+    )
+    for i, row in enumerate(schedule):
+        if i < len(paid_txns):
+            row['paid'] = True
+            row['paid_txn_id'] = paid_txns[i]['id']
+            row['paid_date'] = paid_txns[i]['date']
+        else:
+            row['paid'] = False
+    return jsonify({'success': True, 'schedule': schedule, 'account': acct})
 
 
 @app.route('/api/accounts/balances', methods=['GET'])

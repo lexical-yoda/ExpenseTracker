@@ -798,7 +798,7 @@
           <label for="account">Account</label>
           <select id="account" required>
             <option value="" disabled selected>Select account</option>
-            {% for acct in accounts %}
+            {% for acct in accounts if acct.type != 'emi' %}
             <option value="{{ acct.name }}">{{ acct.name }}</option>
             {% endfor %}
           </select>
@@ -815,6 +815,16 @@
         <div class="form-group" id="units-group" style="display:none">
           <label for="units">Units</label>
           <input type="number" id="units" placeholder="Number of units bought/sold" step="0.001" min="0" inputmode="decimal">
+        </div>
+
+        <div class="form-group" id="emi-link-group" style="display:none">
+          <label for="emi_id">Link to EMI <span style="color:var(--muted)">(optional — mark this as an installment)</span></label>
+          <select id="emi_id">
+            <option value="">— None —</option>
+            {% for acct in accounts if acct.type == 'emi' %}
+            <option value="{{ acct.id }}">{{ acct.name }}</option>
+            {% endfor %}
+          </select>
         </div>
 
         <hr class="divider">
@@ -870,7 +880,7 @@
   <div class="filter-bar">
     <select id="filter-account" class="filter-select">
       <option value="">All Accounts</option>
-      {% for acct in accounts %}
+      {% for acct in accounts if acct.type != 'emi' %}
       <option value="{{ acct.name }}">{{ acct.name }}</option>
       {% endfor %}
     </select>
@@ -1043,7 +1053,7 @@
       <label for="edit-account">Account</label>
       <select id="edit-account" required>
         <option value="" disabled>Select account</option>
-        {% for acct in accounts %}
+        {% for acct in accounts if acct.type != 'emi' %}
         <option value="{{ acct.name }}">{{ acct.name }}</option>
         {% endfor %}
       </select>
@@ -1057,6 +1067,16 @@
     <div class="form-group" id="edit-units-group" style="display:none">
       <label for="edit-units">Units</label>
       <input type="number" id="edit-units" step="0.001" min="0" inputmode="decimal">
+    </div>
+
+    <div class="form-group" id="edit-emi-link-group" style="display:none">
+      <label for="edit-emi-id">Link to EMI <span style="color:var(--muted)">(optional)</span></label>
+      <select id="edit-emi-id">
+        <option value="">— None —</option>
+        {% for acct in accounts if acct.type == 'emi' %}
+        <option value="{{ acct.id }}">{{ acct.name }}</option>
+        {% endfor %}
+      </select>
     </div>
 
     <div class="form-group">
@@ -1170,6 +1190,23 @@
       }
     });
   }
+
+  // Show/hide EMI link dropdown based on transaction type (Expense only)
+  function updateEmiLinkVisibility() {
+    const type = document.querySelector('input[name="txn_type"]:checked');
+    const group = document.getElementById('emi-link-group');
+    if (!group) return;
+    const hasEmis = document.querySelectorAll('#emi_id option').length > 1;
+    if (type && type.value === 'Expense' && hasEmis) {
+      group.style.display = 'block';
+    } else {
+      group.style.display = 'none';
+      const sel = document.getElementById('emi_id');
+      if (sel) sel.value = '';
+    }
+  }
+  document.querySelectorAll('input[name="txn_type"]').forEach(r => r.addEventListener('change', updateEmiLinkVisibility));
+  updateEmiLinkVisibility();
   let modalMode = 'category'; // 'category' or 'subcategory'
   let deleteTargetId = null;
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -1293,6 +1330,8 @@
     const parentIdEl = document.getElementById('parent_id');
     const unitsEl = document.getElementById('units');
     const unitsVal = unitsEl && unitsEl.value ? parseFloat(unitsEl.value) : null;
+    const emiLinkEl = document.getElementById('emi_id');
+    const emiIdVal = emiLinkEl && emiLinkEl.value ? parseInt(emiLinkEl.value) : null;
     const payload = {
       date: document.getElementById('date').value,
       description: document.getElementById('description').value,
@@ -1303,6 +1342,7 @@
       parent_id: parentIdEl ? parseInt(parentIdEl.value) : null,
       type: document.querySelector('input[name="txn_type"]:checked').value,
       units: unitsVal,
+      emi_id: emiIdVal,
     };
 
     try {
@@ -1629,9 +1669,39 @@
       document.getElementById('edit-units').value = '';
     }
 
+    // Show EMI link dropdown if Expense
+    const editEmiGroup = document.getElementById('edit-emi-link-group');
+    const editEmiSelect = document.getElementById('edit-emi-id');
+    const hasEmis = editEmiSelect && editEmiSelect.options.length > 1;
+    if (editEmiGroup) {
+      if (txn.type === 'Expense' && hasEmis) {
+        editEmiGroup.style.display = 'block';
+        editEmiSelect.value = txn.emi_id ? String(txn.emi_id) : '';
+      } else {
+        editEmiGroup.style.display = 'none';
+        if (editEmiSelect) editEmiSelect.value = '';
+      }
+    }
+
     document.getElementById('edit-title').textContent = txn.parent_id ? 'Edit Sub-item' : 'Edit Transaction';
     document.getElementById('edit-modal').classList.add('open');
   }
+
+  // Toggle EMI link visibility in edit modal based on type changes
+  document.querySelectorAll('input[name="edit-type"]').forEach(r => {
+    r.addEventListener('change', function() {
+      const editEmiGroup = document.getElementById('edit-emi-link-group');
+      const editEmiSelect = document.getElementById('edit-emi-id');
+      if (!editEmiGroup) return;
+      const hasEmis = editEmiSelect && editEmiSelect.options.length > 1;
+      if (this.value === 'Expense' && hasEmis) {
+        editEmiGroup.style.display = 'block';
+      } else {
+        editEmiGroup.style.display = 'none';
+        if (editEmiSelect) editEmiSelect.value = '';
+      }
+    });
+  });
 
   document.getElementById('edit-modal').addEventListener('click', function(e) {
     if (e.target === this) this.classList.remove('open');
@@ -1655,6 +1725,8 @@
     const txnId = document.getElementById('edit-txn-id').value;
     const editUnitsEl = document.getElementById('edit-units');
     const editUnitsVal = editUnitsEl && editUnitsEl.value ? parseFloat(editUnitsEl.value) : null;
+    const editEmiEl = document.getElementById('edit-emi-id');
+    const editEmiVal = editEmiEl && editEmiEl.value ? parseInt(editEmiEl.value) : null;
     const payload = {
       date: document.getElementById('edit-date').value,
       description: document.getElementById('edit-desc').value,
@@ -1664,6 +1736,7 @@
       sub_category: document.getElementById('edit-subcategory').value,
       type: document.querySelector('input[name="edit-type"]:checked').value,
       units: editUnitsVal,
+      emi_id: editEmiVal,
     };
 
     try {

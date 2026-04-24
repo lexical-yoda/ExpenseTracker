@@ -493,10 +493,11 @@
 
   function renderAccountBalances() {
     const container = document.getElementById('acct-balances');
-    const nonInvestment = balancesData.filter(b => b.type !== 'investment');
+    const savingsAndCC = balancesData.filter(b => b.type === 'savings' || b.type === 'credit');
     const investments = balancesData.filter(b => b.type === 'investment');
+    const emis = balancesData.filter(b => b.type === 'emi' && b.status !== 'closed');
 
-    let html = nonInvestment.map(b => {
+    let html = savingsAndCC.map(b => {
       const isSavings = b.type === 'savings';
       const amount = isSavings ? fmt(b.current_balance || 0) : fmt(b.remaining || 0);
       const detail = isSavings ? 'Current balance' : `Spent ${fmt(b.accumulated || 0)} of ${fmt(b.limit || 0)}`;
@@ -509,6 +510,29 @@
         <div class="acct-bal-amount" style="color:var(--${isSavings ? 'savings' : 'cc'})">${amount}</div>
       </div>`;
     }).join('');
+
+    // EMI cards
+    if (emis.length > 0) {
+      html += emis.map(b => {
+        const total = b.installments_total || 0;
+        const paid = b.installments_paid || 0;
+        const pct = total ? (paid / total) * 100 : 0;
+        const nextLine = b.next_due_date
+          ? `Next: ${b.next_due_date} · ${fmt(b.next_installment || 0)}`
+          : 'All installments paid';
+        return `<div class="acct-bal-card">
+          <span class="acct-bal-dot" style="background:#e85a71"></span>
+          <div class="acct-bal-info" style="min-width:0;">
+            <div class="acct-bal-name">${escHTML(b.name)}</div>
+            <div class="acct-bal-detail">${paid}/${total} paid · ${nextLine}</div>
+            <div style="margin-top:4px;height:4px;background:var(--border);border-radius:999px;overflow:hidden;">
+              <div style="width:${pct}%;height:100%;background:#e85a71;transition:width 0.5s;"></div>
+            </div>
+          </div>
+          <div class="acct-bal-amount" style="color:#e85a71">${fmt(b.outstanding_principal || 0)}</div>
+        </div>`;
+      }).join('');
+    }
 
     // Investment cards with loading state
     if (investments.length > 0) {
@@ -715,6 +739,7 @@
     let stocksTotal = 0;
     let fdTotal = 0;
     let ccDebt = 0;
+    let emiDebt = 0;
 
     balancesData.forEach(b => {
       if (b.type === 'savings') {
@@ -723,6 +748,9 @@
       } else if (b.type === 'credit') {
         ccDebt += (b.accumulated || 0);
         netWorth -= (b.accumulated || 0);
+      } else if (b.type === 'emi' && b.status === 'active') {
+        emiDebt += (b.outstanding_principal || 0);
+        netWorth -= (b.outstanding_principal || 0);
       }
     });
 
@@ -760,6 +788,7 @@
       { label: 'Stocks / ETFs', value: stocksTotal, color: 'var(--accent)', positive: true },
       { label: 'Fixed Deposits', value: fdTotal, color: '#d29922', positive: true },
       { label: 'Credit Card Debt', value: ccDebt, color: 'var(--danger)', positive: false },
+      { label: 'EMI Outstanding', value: emiDebt, color: '#e85a71', positive: false },
     ].filter(c => Math.abs(c.value) > 0);
 
     const totalPositive = categories.filter(c => c.positive).reduce((s, c) => s + c.value, 0);

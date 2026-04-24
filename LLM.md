@@ -87,29 +87,35 @@ Read on every request via `load_auth()` — no in-memory caching. Changes take e
 
 ### accounts.json
 
-Array of account objects. Three types: `savings`, `credit`, and `investment`.
+Array of account objects. Four types: `savings`, `credit`, `investment`, and `emi`.
 
 ```json
 [
   {"id": 1, "name": "HDFC Savings", "type": "savings", "balance": 50000},
   {"id": 2, "name": "ICICI Credit Card", "type": "credit", "limit": 200000},
   {"id": 3, "name": "NIFTYBEES", "type": "investment", "subtype": "market", "balance": 62823, "ticker": "NIFTYBEES.NS", "units": 220},
-  {"id": 4, "name": "HDFC FD", "type": "investment", "subtype": "fd", "balance": 100000, "interest_rate": 7.5, "start_date": "2025-09-15", "maturity_date": "2026-09-15", "compounding": "quarterly"}
+  {"id": 4, "name": "HDFC FD", "type": "investment", "subtype": "fd", "balance": 100000, "interest_rate": 7.5, "start_date": "2025-09-15", "maturity_date": "2026-09-15", "compounding": "quarterly"},
+  {"id": 5, "name": "Apple Purchase — EMI", "type": "emi", "principal": 85090, "interest_rate": 16.0, "tenure_months": 3, "booking_date": "2026-04-17", "first_installment_date": "2026-05-14", "linked_account_id": 2}
 ]
 ```
 
 - `id`: Auto-incrementing integer, unique per account
-- `name`: Display name, must be unique. This exact string is stored in the spreadsheet's Account column
-- `type`: `"savings"`, `"credit"`, or `"investment"`
+- `name`: Display name, must be unique. This exact string is stored in the spreadsheet's Account column (not applicable to EMI accounts — they're referenced via `emi_id` on transactions)
+- `type`: `"savings"`, `"credit"`, `"investment"`, or `"emi"`
 - `balance` (savings): Opening balance — the starting amount before any transactions
 - `balance` (investment): Total invested amount (cost basis / principal)
 - `limit` (credit only): Credit limit
 - `subtype` (investment only): `"market"` (ETF/stock with live pricing) or `"fd"` (fixed deposit)
 - `ticker` (market only): Yahoo Finance symbol (e.g., `NIFTYBEES.NS`)
 - `units` (market only): Number of units/shares held. Auto-updated when transactions with units are added.
-- `interest_rate` (FD only): Annual interest rate percentage
+- `interest_rate` (FD / EMI): Annual interest rate percentage
 - `start_date` / `maturity_date` (FD only): `YYYY-MM-DD` strings
 - `compounding` (FD only): `"monthly"`, `"quarterly"`, `"half-yearly"`, or `"yearly"`
+- `principal` (EMI only): Loan amount
+- `tenure_months` (EMI only): Number of monthly installments
+- `booking_date` (EMI only): Date the loan was booked (`YYYY-MM-DD`)
+- `first_installment_date` (EMI only): Date of first EMI due (`YYYY-MM-DD`) — used as the anchor for the schedule
+- `linked_account_id` (EMI, optional): ID of the source credit card or savings account the EMI was originated from. Informational only — installments are tracked via `emi_id` on transactions.
 
 Balances are computed on the fly by `compute_account_balances()` in `spreadsheet.py` which sums all parent transactions per account against the opening balance/limit. Investment accounts return their cost basis; live values are fetched separately via `/api/investments/prices`.
 
@@ -150,6 +156,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 | I | 9 | Type | `"Expense"`, `"Income"`, or `"Transfer"`. NULL treated as Expense |
 | J | 10 | Track | `"Yes"` or `"No"`. Controls dashboard visibility. NULL treated as Yes |
 | K | 11 | Units | Float. Number of units bought/sold for investment account transactions. NULL for non-investment |
+| L | 12 | EMI ID | Integer. Links an installment transaction to an EMI account (account id). NULL for non-EMI transactions. Only meaningful on Expense-type rows. |
 
 ### Transaction hierarchy
 
@@ -284,10 +291,11 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 | Method | URL | Purpose |
 |--------|-----|---------|
 | GET | `/api/accounts` | List all accounts |
-| POST | `/api/accounts` | Create account. Body: `{name, type, balance/limit}` |
-| PUT | `/api/accounts/<id>` | Update account. Body: `{name, balance/limit}` |
-| DELETE | `/api/accounts/<id>` | Delete account (blocked if transactions exist) |
-| GET | `/api/accounts/balances` | Get computed balances for all accounts |
+| POST | `/api/accounts` | Create account. Body: `{name, type, balance/limit}` or (for EMI) `{name, type: "emi", principal, interest_rate, tenure_months, booking_date, first_installment_date, linked_account_id}` |
+| PUT | `/api/accounts/<id>` | Update account. Body: `{name, balance/limit}` or EMI fields |
+| DELETE | `/api/accounts/<id>` | Delete account (blocked if transactions reference it — for non-EMI by account name, for EMI by `emi_id`) |
+| GET | `/api/accounts/balances` | Get computed balances for all accounts (EMI entries include `outstanding_principal`, `installments_paid`, `installments_total`, `next_due_date`, `next_installment`, `status`) |
+| GET | `/api/accounts/<id>/schedule` | EMI-only. Returns full schedule with `paid` flag on each row that's been tagged. Body: `{success, schedule, account}` |
 
 ### Investments
 
@@ -408,7 +416,9 @@ Period Summary and Spending Velocity always use absolute current/last month data
 
 ### Spreadsheet column backward compatibility
 
-The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 11 columns (A–K) with no gaps. Type at column I (index 9), Track at column J (index 10), Units at column K (index 11). Earlier versions had dead balance columns — these were cleaned up and the layout consolidated.
+The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 12 columns (A–L) with no gaps. Type at column I (index 9), Track at column J (index 10), Units at column K (index 11), EMI ID at column L (index 12). Earlier versions had dead balance columns — these were cleaned up and the layout consolidated.
+
+Existing month sheets created before column L was added will not have the "EMI ID" header cell, but writes to column L still work correctly (openpyxl auto-extends). New month sheets created via `ensure_month_sheet()` will have all 12 headers set.
 
 ### `parse_row()` bounds checking
 
@@ -641,6 +651,53 @@ Every email parsing attempt is logged in `data/pipeline_log.json`:
 - LLM calls happen server-side via `urllib.request` — the LLM URL can be a private/local address
 - Email text is truncated to 500 chars before storing in drafts (prevents large payloads)
 - Draft content is escaped in the frontend via `textContent` assignment (XSS-safe)
+
+---
+
+## EMI Tracking
+
+The app supports EMI (loan) tracking as a separate account type. EMIs are liabilities that sit alongside CC debt in net worth computation but are tracked separately with their own amortization schedule.
+
+### Data model
+
+An EMI account in `accounts.json` has:
+- `type: "emi"`
+- `principal`, `interest_rate` (annual %), `tenure_months`
+- `booking_date`, `first_installment_date`
+- `linked_account_id` (optional) — source CC or savings account
+
+### Schedule computation
+
+`compute_emi_schedule(principal, annual_rate, tenure_months, first_installment_date)` in `spreadsheet.py` returns a list of monthly rows with `date`, `principal`, `interest`, `installment`, `balance_after`. Uses the standard reducing-balance EMI formula (`P*r*(1+r)^n / ((1+r)^n - 1)`) with equal monthly installments. Last installment's principal absorbs any rounding residue so `balance_after` is exactly 0. For zero-rate loans it falls back to `principal / tenure`.
+
+Due dates are computed by adding months to `first_installment_date`, clamping the day to the month's last day (so Jan 31 + 1 month → Feb 28/29).
+
+**Note**: Banks sometimes charge "broken period interest" for the gap between booking and first installment, making the first installment slightly larger than subsequent ones. `compute_emi_schedule()` uses standard uniform EMI and does not model this — displayed totals may be off by small amounts from the actual bank schedule. The principal portions match closely.
+
+### Installment tracking
+
+Transactions link to an EMI via the `emi_id` column (xlsx column L). When you record the monthly EMI debit on your CC, tag it with the EMI account in the "Link to EMI" dropdown on the Manage page (shown only for Expense type when at least one active EMI exists).
+
+`compute_account_balances()` for an EMI account:
+- Counts transactions with matching `emi_id` (parents only) sorted by date — `installments_paid` = that count
+- Uses the first N schedule rows (where N = installments paid) to compute `principal_paid`, `interest_paid`
+- `outstanding_principal = principal - principal_paid`
+- `next_due_date` / `next_installment` come from schedule row N (the next unpaid one)
+- `status` flips to `"closed"` once all installments have a matching transaction
+
+### UI
+
+- **Accounts page**: EMI cards show outstanding / principal, rate, tenure, progress bar (X/N paid), next due date + amount. A "Schedule" (📅) button opens a modal with the full amortization table and paid/unpaid markers.
+- **Dashboard**: EMI accounts render as their own cards with progress bar. Net worth subtracts sum of active EMI `outstanding_principal`. Net-worth breakdown shows "EMI Outstanding" as a red bar alongside "Credit Card Debt".
+- **Manage page**: "Link to EMI" dropdown appears in the add form (and edit modal) when the transaction type is Expense. Selecting an EMI writes `emi_id` to the xlsx row.
+
+### Limitations (minimal v1)
+
+- No "Convert to EMI" action on existing CC purchases — EMIs must be set up manually on the Accounts page
+- No auto-post of the Aggregator offset Income on the source CC — user records it separately
+- Installment matching is by count (1st tagged txn = 1st scheduled installment). If installments are paid out of order or skipped, the schedule alignment is still linear; re-ordering isn't supported.
+- No support for variable-rate or step-up EMIs
+- No interest calculation discrepancy reconciliation (bank's broken-period interest isn't modeled)
 
 ---
 

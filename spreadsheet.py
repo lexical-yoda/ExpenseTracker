@@ -29,6 +29,7 @@ COLUMNS = {
     'txn_type': 9,      # I
     'track': 10,        # J — Yes/No, controls dashboard visibility
     'units': 11,        # K — units bought/sold for investment accounts
+    'emi_id': 12,       # L — links installment transactions to an EMI account
 }
 
 TABLE_START = 1  # Column headers row
@@ -91,8 +92,8 @@ def _init_sheet(ws):
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     headers = ['Date', 'Txn ID', 'Description', 'Category', 'Sub-Category',
-               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track', 'Units']
-    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8, 10]
+               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track', 'Units', 'EMI ID']
+    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8, 10, 8]
 
     for col, header in enumerate(headers, start=1):
         if not header:
@@ -156,6 +157,9 @@ def parse_row(row, sheet_name):
     units_val = val('units')
     units = float(units_val) if units_val is not None and units_val != '' else None
 
+    emi_id_val = val('emi_id')
+    emi_id = int(emi_id_val) if isinstance(emi_id_val, int) or (isinstance(emi_id_val, str) and emi_id_val.isdigit()) else None
+
     return {
         'id': txn_id,
         'date': date_str,
@@ -168,6 +172,7 @@ def parse_row(row, sheet_name):
         'type': txn_type or 'Expense',
         'track': tracked,
         'units': units,
+        'emi_id': emi_id,
         'sheet': sheet_name,
     }
 
@@ -211,7 +216,7 @@ def get_transaction_by_id(txn_id):
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
-def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None):
+def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None, emi_id=None):
     """Append a transaction to the correct month sheet. Returns txn_id."""
     with _xlsx_lock:
         d = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -239,6 +244,8 @@ def add_transaction(date_str, description, category, sub_category, account, amou
         ws_fresh.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if track else 'No'
         if units is not None:
             ws_fresh.cell(row=next_row, column=COLUMNS['units']).value = units
+        if emi_id is not None:
+            ws_fresh.cell(row=next_row, column=COLUMNS['emi_id']).value = int(emi_id)
         ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
 
         save_workbook(wb)
@@ -341,6 +348,8 @@ def _update_transaction_inner(txn_id, data):
             ws2.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if data['track'] else 'No'
         if 'units' in data and data['units'] is not None:
             ws2.cell(row=next_row, column=COLUMNS['units']).value = float(data['units'])
+        if 'emi_id' in data:
+            ws2.cell(row=next_row, column=COLUMNS['emi_id']).value = int(data['emi_id']) if data['emi_id'] else None
         if parent_id is not None:
             ws2.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
         save_workbook(wb2)
@@ -359,6 +368,8 @@ def _update_transaction_inner(txn_id, data):
         ws.cell(row=row_num, column=COLUMNS['track']).value = 'Yes' if data['track'] else 'No'
     if 'units' in data and data['units'] is not None:
         ws.cell(row=row_num, column=COLUMNS['units']).value = float(data['units'])
+    if 'emi_id' in data:
+        ws.cell(row=row_num, column=COLUMNS['emi_id']).value = int(data['emi_id']) if data['emi_id'] else None
 
     save_workbook(wb)
     return get_transaction_by_id(txn_id)
@@ -446,6 +457,76 @@ def rename_account_in_sheets(old_name, new_name):
             save_workbook(wb)
 
 
+def compute_emi_schedule(principal, annual_rate, tenure_months, first_installment_date):
+    """Compute EMI schedule using reducing-balance method.
+
+    Args:
+        principal: float — loan amount
+        annual_rate: float — annual interest rate in percent (e.g. 16 for 16%)
+        tenure_months: int — number of monthly installments
+        first_installment_date: 'YYYY-MM-DD' string OR date object — date of first EMI
+
+    Returns:
+        list of dicts, each with: index (1-based), date, principal, interest,
+        installment, balance_after. Last installment adjusts for rounding so
+        balance_after is exactly 0.
+    """
+    try:
+        principal = float(principal or 0)
+        tenure_months = int(tenure_months or 0)
+        annual_rate = float(annual_rate or 0)
+    except (ValueError, TypeError):
+        return []
+    if principal <= 0 or tenure_months <= 0:
+        return []
+
+    if isinstance(first_installment_date, str):
+        try:
+            start = datetime.strptime(first_installment_date, '%Y-%m-%d').date()
+        except ValueError:
+            return []
+    elif isinstance(first_installment_date, date):
+        start = first_installment_date
+    else:
+        return []
+
+    r = (annual_rate / 100.0) / 12.0
+    if r > 0:
+        emi = principal * r * ((1 + r) ** tenure_months) / (((1 + r) ** tenure_months) - 1)
+    else:
+        emi = principal / tenure_months
+
+    from calendar import monthrange
+
+    schedule = []
+    balance = principal
+    for i in range(tenure_months):
+        year = start.year + (start.month - 1 + i) // 12
+        month = (start.month - 1 + i) % 12 + 1
+        last_day = monthrange(year, month)[1]
+        due_day = min(start.day, last_day)
+        due_date = date(year, month, due_day)
+
+        interest_part = balance * r
+        if i == tenure_months - 1:
+            principal_part = balance
+            installment = principal_part + interest_part
+        else:
+            principal_part = emi - interest_part
+            installment = emi
+        balance = max(0.0, balance - principal_part)
+
+        schedule.append({
+            'index': i + 1,
+            'date': due_date.strftime('%Y-%m-%d'),
+            'principal': round(principal_part, 2),
+            'interest': round(interest_part, 2),
+            'installment': round(installment, 2),
+            'balance_after': round(balance, 2),
+        })
+    return schedule
+
+
 def compute_account_balances():
     """Compute current balance for each account from accounts.json + transactions."""
     with _accounts_lock:
@@ -459,12 +540,15 @@ def compute_account_balances():
 
     spend_by_account = defaultdict(float)
     income_by_account = defaultdict(float)
+    emi_payments_by_id = defaultdict(list)  # emi_id -> [txn, ...]
     for t in parents:
         if t['type'] == 'Income':
             income_by_account[t['account']] += t['amount']
         else:
             # Both Expense and Transfer reduce account balance
             spend_by_account[t['account']] += t['amount']
+        if t.get('emi_id'):
+            emi_payments_by_id[int(t['emi_id'])].append(t)
 
     result = []
     for acct in accounts:
@@ -482,6 +566,36 @@ def compute_account_balances():
             # Investment accounts: balance = cost basis / principal
             entry = {**acct, 'invested': acct.get('balance', 0)}
             entry['subtype'] = acct.get('subtype', 'market')
+            result.append(entry)
+        elif acct['type'] == 'emi':
+            principal = float(acct.get('principal', 0) or 0)
+            tenure = int(acct.get('tenure_months', 0) or 0)
+            rate = float(acct.get('interest_rate', 0) or 0)
+            first_date = acct.get('first_installment_date') or ''
+            schedule = compute_emi_schedule(principal, rate, tenure, first_date) if first_date else []
+
+            # Count paid installments = transactions with matching emi_id, sorted by date
+            paid_txns = sorted(emi_payments_by_id.get(acct['id'], []), key=lambda t: t['date'])
+            paid_count = min(len(paid_txns), len(schedule))
+
+            principal_paid = sum(s['principal'] for s in schedule[:paid_count])
+            interest_paid = sum(s['interest'] for s in schedule[:paid_count])
+            interest_remaining = sum(s['interest'] for s in schedule[paid_count:])
+            outstanding = max(0.0, principal - principal_paid)
+            next_schedule = schedule[paid_count] if paid_count < len(schedule) else None
+
+            entry = {**acct,
+                     'outstanding_principal': round(outstanding, 2),
+                     'principal_paid': round(principal_paid, 2),
+                     'interest_paid': round(interest_paid, 2),
+                     'interest_remaining': round(interest_remaining, 2),
+                     'installments_paid': paid_count,
+                     'installments_total': len(schedule),
+                     'installments_remaining': max(0, len(schedule) - paid_count),
+                     'next_due_date': next_schedule['date'] if next_schedule else None,
+                     'next_installment': next_schedule['installment'] if next_schedule else 0,
+                     'status': 'closed' if paid_count >= len(schedule) and len(schedule) > 0 else 'active',
+                     }
             result.append(entry)
     return result
 

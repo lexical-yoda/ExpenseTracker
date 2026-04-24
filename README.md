@@ -48,7 +48,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 
 | Feature | Description |
 |---------|-------------|
-| **Multi-account tracking** | Savings, credit cards, and investment accounts — each with their own balance logic |
+| **Multi-account tracking** | Savings, credit cards, investment accounts, and EMI loans — each with their own balance logic |
 | **Income, expense & transfers** | Track money in, money out, and money moved between accounts |
 | **Sub-expenses** | Break down a grocery order or restaurant bill into individual items |
 | **Dashboard** | Stat cards, daily spending chart, cumulative average, category breakdown, account split, month-over-month comparison |
@@ -56,7 +56,8 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | **CC billing cycle** | Current cycle spend, projected bill, previous cycle bill, cycle-over-cycle comparison |
 | **Investments** | ETF/stock tracking with live Yahoo Finance prices, P&L, and auto-unit updates on purchase |
 | **Fixed deposits** | Compound interest calculation with maturity countdown |
-| **Net worth** | Savings + investments - CC debt, with configurable milestone goals and progress bar |
+| **EMI loans** | Track CC-converted and personal loan EMIs with reducing-balance amortization, next-due date, and paid/remaining installment tracker |
+| **Net worth** | Savings + investments - CC debt - EMI outstanding, with configurable milestone goals and progress bar |
 
 ### Quality of Life
 
@@ -150,6 +151,26 @@ All user data lives in the `data/` folder:
 
 ### Net Worth
 The dashboard shows: sum of all savings balances + investment current values - credit card outstanding. A configurable milestone goal with progress bar auto-advances as you hit targets.
+
+---
+
+## EMI Tracking
+
+Add an EMI account on the **Accounts** page with:
+- Principal (loan amount)
+- Interest rate (% p.a., reducing balance)
+- Tenure in months
+- Booking date + first installment date
+- (Optional) Source account it was originated from
+
+The app computes the full amortization schedule (principal/interest per month). When each monthly EMI bills on your CC, record the expense as usual and pick the EMI from the **Link to EMI** dropdown on the Manage page — it'll count as one installment paid.
+
+Dashboard shows outstanding principal, progress bar, and next due date. Net worth subtracts active EMI outstanding just like CC debt. Click the 📅 icon on an EMI card to see the full schedule with paid/unpaid markers.
+
+Useful for:
+- CC purchases converted to EMI (HDFC SmartEMI, Axis EasyEMI, etc.)
+- Personal loans and consumer durable loans
+- Any fixed-tenure installment plan
 
 ---
 
