@@ -34,16 +34,25 @@
           },
           "conditions": [
             {
-              "id": "sender-filter",
+              "id": "hdfc-filter",
               "leftValue": "={{ $json.from }}",
-              "rightValue": "REPLACE_WITH_BANK_SENDER_EMAIL",
+              "rightValue": "alerts@hdfcbank",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "icici-filter",
+              "leftValue": "={{ $json.from }}",
+              "rightValue": "credit_cards@icici.bank.in",
               "operator": {
                 "type": "string",
                 "operation": "contains"
               }
             }
           ],
-          "combinator": "and"
+          "combinator": "or"
         }
       },
       "id": "filter-sender",

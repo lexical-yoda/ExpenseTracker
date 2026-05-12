@@ -42,7 +42,7 @@ def strip_email_html(html: str) -> str | None:
 
     # Extract transaction text between "Dear Customer" and sign-off
     match = re.search(
-        r'Dear Customer[,.]?\s*(.+?)(?:Warm [Rr]egards|Assuring you|This is a system)',
+        r'Dear Customer[,.]?\s*(.+?)(?:Warm [Rr]egards|Assuring you|This is a system|This is an auto-generated|In case you have not done|Sincerely,?\s*Team\s+ICICI|Team ICICI Bank|Discover a new way)',
         text,
         re.DOTALL
     )
@@ -156,12 +156,16 @@ def _validate_parsed(parsed: dict) -> bool:
     if parsed.get('type') not in valid_types:
         parsed['type'] = 'Expense'
 
+    # Currency: default to INR if missing/invalid
+    if parsed.get('currency') not in ('INR', 'USD'):
+        parsed['currency'] = 'INR'
+
     return True
 
 
 def build_default_prompt(account_mapping: dict = None) -> str:
     """
-    Build the default system prompt for HDFC Bank email parsing.
+    Build the default system prompt for HDFC Bank + ICICI Bank email parsing.
     Account mapping is injected dynamically.
     """
     current_year = datetime.now().year
@@ -177,26 +181,33 @@ def build_default_prompt(account_mapping: dict = None) -> str:
 
     categories = "Groceries, Dining, Transport, Utilities, Shopping, Health, Entertainment, Education, Rent & Housing, Savings & Investment, Subscriptions, Miscellaneous"
 
-    return f"""You are a bank transaction parser for HDFC Bank email alerts. The current year is {current_year}.
+    return f"""You are a bank transaction parser for HDFC Bank and ICICI Bank email alerts. The current year is {current_year}.
 
 CRITICAL RULES — follow these exactly:
 
 DATE PARSING:
-- DD-MM-YY format: the YY is the last two digits of {current_year}. So 24-03-{str(current_year)[-2:]} means {current_year}-03-24
-- "DD Mon, YYYY" format: use as-is. So "24 Mar, {current_year}" means {current_year}-03-24
+- DD-MM-YY format (HDFC): the YY is the last two digits of {current_year}. So 24-03-{str(current_year)[-2:]} means {current_year}-03-24
+- "DD Mon, YYYY" format (HDFC): use as-is. So "24 Mar, {current_year}" means {current_year}-03-24
+- "Mon DD, YYYY" format (ICICI): e.g., "May 07, 2026" means 2026-05-07
 - Always output dates as YYYY-MM-DD
 
 ACCOUNT IDENTIFICATION — this is the most important rule:
 {mapping_lines}
-- If the email says "debited from account XXXX", match XXXX against the account mapping above
-- If the email says "Credit Card ending XXXX", match that against the account mapping above
+- HDFC: "debited from account XXXX" or "Credit Card ending XXXX"
+- ICICI: "ICICI Bank Credit Card XXNNNN" (e.g., "Credit Card XX2004") — match the "XXNNNN" token against the mapping
 - The "account" field in your output MUST be one of the exact account names from the mapping above
 - NEVER use "VPA", "UPI", "IMAP", or any other value — only the mapped account names
 
 MERCHANT NAME:
-- For UPI transactions: the email says "to VPA someaddress@bank MERCHANT NAME on DD-MM-YY" — extract ONLY the merchant name AFTER the VPA address, not the VPA address itself
-- For Credit Card transactions: the email says "towards MERCHANT on DD Mon, YYYY" — extract the merchant name after "towards"
+- HDFC UPI: "to VPA someaddress@bank MERCHANT NAME on DD-MM-YY" — extract only the merchant after the VPA address
+- HDFC CC: "towards MERCHANT on DD Mon, YYYY" — extract merchant after "towards"
+- ICICI CC: "Info: MERCHANT NAME." — extract the text after "Info:" up to the period. Title-case it (e.g., "AMAZON PAY IN E COMMERCE" → "Amazon Pay")
 - Strip prefixes: PYU*, MAB.*, or any VPA/bank identifier (e.g., "PYU*Swiggy Food" → "Swiggy Food")
+
+AMOUNT AND CURRENCY:
+- ICICI shows currency code: "INR 2,253.00" or "USD 67.04". Output the numeric amount as-is and set the currency field accordingly.
+- HDFC: amounts are always INR. Set currency to "INR".
+- Remove thousand-separator commas before parsing the number.
 
 CATEGORY — must be one of these exact values, NEVER use "Expense" or "Income" as category:
 {categories}
@@ -204,11 +215,11 @@ CATEGORY — must be one of these exact values, NEVER use "Expense" or "Income" 
 - If unsure, use "Miscellaneous"
 
 TYPE:
-- All debits are "Expense"
-- All credits are "Income"
+- All debits / "used for a transaction" / "spent" → "Expense"
+- All credits / refunds → "Income"
 
 Return ONLY a valid JSON object with these exact fields — no explanation, no markdown, no extra text:
-{{"amount": number, "merchant": "string", "date": "YYYY-MM-DD", "account": "string", "category": "string", "type": "Expense"}}"""
+{{"amount": number, "currency": "INR"|"USD", "merchant": "string", "date": "YYYY-MM-DD", "account": "string", "category": "string", "type": "Expense"}}"""
 
 
 # ── Meta-prompt for users setting up custom bank parsing ─────────────────────

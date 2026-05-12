@@ -879,6 +879,70 @@ def fetch_yahoo_price(ticker):
         return None
 
 
+# ── USD-INR historical rate (for ICICI/USD card transactions) ───────────────
+
+_fx_cache = {}  # {date_str: rate}
+
+def fetch_usd_inr_rate(date_str):
+    """Fetch USD-INR close rate on/near the given date via Yahoo Finance.
+    Returns float or None. Results cached for the process lifetime."""
+    if not date_str:
+        return None
+    if date_str in _fx_cache:
+        return _fx_cache[date_str]
+    try:
+        target = datetime.strptime(date_str, '%Y-%m-%d').date()
+        target_dt = datetime.combine(target, datetime.min.time())
+        period1 = int((target_dt - timedelta(days=7)).timestamp())
+        period2 = int((target_dt + timedelta(days=2)).timestamp())
+        url = f'https://query1.finance.yahoo.com/v8/finance/chart/USDINR=X?period1={period1}&period2={period2}&interval=1d'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        result = data['chart']['result'][0]
+        ts_list = result.get('timestamp', []) or []
+        closes = result.get('indicators', {}).get('quote', [{}])[0].get('close', []) or []
+        target_ts = target_dt.timestamp() + 86400  # allow same-day match
+        best = None
+        for t, c in zip(ts_list, closes):
+            if c is None:
+                continue
+            if t <= target_ts:
+                best = c
+        if best is None:
+            best = next((c for c in closes if c is not None), None)
+        if best:
+            _fx_cache[date_str] = best
+            return best
+    except Exception as e:
+        app.logger.warning("USD-INR rate fetch failed for %s: %s", date_str, e)
+    return None
+
+
+def apply_currency_conversion(parsed):
+    """If parsed['currency'] is non-INR, convert amount to INR using Yahoo rate
+    for parsed['date']. Adds original_amount/original_currency/fx_rate fields.
+    Mutates and returns the dict. No-op for INR or None."""
+    if not parsed:
+        return parsed
+    cur = parsed.get('currency', 'INR')
+    if cur == 'INR':
+        return parsed
+    if cur == 'USD':
+        rate = fetch_usd_inr_rate(parsed.get('date'))
+        if rate:
+            parsed['original_amount'] = parsed['amount']
+            parsed['original_currency'] = 'USD'
+            parsed['fx_rate'] = round(rate, 4)
+            parsed['amount'] = round(parsed['amount'] * rate, 2)
+            parsed['currency'] = 'INR'
+            app.logger.info("FX convert: USD %.2f -> INR %.2f (rate %.4f on %s)",
+                            parsed['original_amount'], parsed['amount'], rate, parsed['date'])
+        else:
+            app.logger.warning("USD-INR rate unavailable for %s; keeping raw USD amount", parsed.get('date'))
+    return parsed
+
+
 def calculate_fd_value(principal, annual_rate, start_date, maturity_date, compounding='quarterly'):
     """Calculate current and maturity value of a fixed deposit."""
     from math import pow as mpow
@@ -1191,6 +1255,8 @@ def api_ingest_draft():
         log_pipeline_event('failed', 'webhook', email_preview=email_text, error='LLM failed to parse email')
         return jsonify({'success': False, 'error': 'Failed to parse email'}), 422
 
+    apply_currency_conversion(parsed)
+
     app.logger.info("Draft ingest: LLM parsed — merchant='%s' amount=%.2f date=%s account='%s'", parsed['merchant'], parsed['amount'], parsed['date'], parsed['account'])
 
     # Deduplication check
@@ -1254,6 +1320,8 @@ def api_paste_draft():
     if not parsed:
         log_pipeline_event('failed', 'paste', email_preview=email_text, error='LLM failed to parse email')
         return jsonify({'success': False, 'error': 'Could not parse the email text. Check your LLM configuration.'}), 422
+
+    apply_currency_conversion(parsed)
 
     fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
     with _drafts_lock:
@@ -1460,6 +1528,8 @@ def api_pipeline_retry(log_id):
         log_pipeline_event('failed', 'retry', email_preview=email_text, error='LLM failed to parse on retry')
         return jsonify({'success': False, 'error': 'LLM failed to parse again'}), 422
 
+    apply_currency_conversion(parsed)
+
     fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
     with _drafts_lock:
         drafts = load_drafts()
@@ -1586,6 +1656,8 @@ def api_test_webhook():
     if not parsed:
         return jsonify({'success': False, 'error': 'LLM failed to parse the email. Check your LLM URL and prompt.'}), 422
 
+    apply_currency_conversion(parsed)
+
     # Step 3: Create draft
     fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
     with _drafts_lock:
@@ -1643,6 +1715,7 @@ def api_test_parse():
 
     parsed = parse_with_llm(email_text, llm_url, system_prompt)
     if parsed:
+        apply_currency_conversion(parsed)
         return jsonify({'success': True, 'parsed': parsed, 'extracted_text': email_text})
     else:
         return jsonify({'success': False, 'error': 'LLM failed to parse. Check URL and prompt.'}), 422
