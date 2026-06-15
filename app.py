@@ -318,6 +318,19 @@ def save_accounts(data):
     _atomic_json_write(ACCOUNTS_FILE, data)
 
 
+def validate_draft_for_accept(draft):
+    """Return an error string if the draft references a non-existent account or
+    category, else None. Prevents drafts (LLM/edited) from creating transactions
+    on phantom accounts that corrupt balance math."""
+    account_names = {a['name'] for a in load_accounts()}
+    if draft.get('account') not in account_names:
+        return f"Account '{draft.get('account')}' does not exist"
+    category = draft.get('category')
+    if category and category not in load_categories():
+        return f"Category '{category}' does not exist"
+    return None
+
+
 # ── Draft helpers ────────────────────────────────────────────────────────────
 
 _drafts_lock = threading.Lock()
@@ -362,8 +375,12 @@ def get_next_draft_id(drafts=None):
         return 1
     return max(d.get('id', 0) for d in drafts) + 1
 
-def draft_fingerprint(amount, date_str, merchant):
-    return f"{amount}|{date_str}|{merchant.lower().strip()}"
+def draft_fingerprint(amount, date_str, merchant, account=''):
+    try:
+        amt = f"{float(amount):.2f}"
+    except (ValueError, TypeError):
+        amt = str(amount)
+    return f"{amt}|{date_str}|{str(account).lower().strip()}|{str(merchant).lower().strip()}"
 
 
 # ── Email config helpers ─────────────────────────────────────────────────────
@@ -420,6 +437,7 @@ def log_pipeline_event(status, source, email_preview='', parsed=None, error=None
             'status': status,  # success, failed, skipped, duplicate
             'source': source,  # webhook, paste
             'email_preview': email_preview[:200] if email_preview else '',
+            'email_full': email_preview[:5000] if email_preview else '',  # untruncated text for accurate retry
             'parsed': parsed,
             'error': error,
             'draft_id': draft_id
@@ -1194,10 +1212,14 @@ def api_ingest_draft():
 
     apply_currency_conversion(parsed)
 
+    if parsed.get('currency') != 'INR':
+        log_pipeline_event('failed', 'webhook', email_preview=email_text, error='USD->INR conversion failed (rate unavailable)')
+        return jsonify({'success': False, 'error': 'Currency conversion failed; draft not created'}), 422
+
     app.logger.info("Draft ingest: LLM parsed — merchant='%s' amount=%.2f date=%s account='%s'", parsed['merchant'], parsed['amount'], parsed['date'], parsed['account'])
 
     # Deduplication check
-    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'], parsed.get('account', ''))
     with _drafts_lock:
         drafts = load_drafts()
         for d in drafts:
@@ -1260,7 +1282,11 @@ def api_paste_draft():
 
     apply_currency_conversion(parsed)
 
-    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    if parsed.get('currency') != 'INR':
+        log_pipeline_event('failed', 'paste', email_preview=email_text, error='USD->INR conversion failed (rate unavailable)')
+        return jsonify({'success': False, 'error': 'Currency conversion failed; draft not created'}), 422
+
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'], parsed.get('account', ''))
     with _drafts_lock:
         drafts = load_drafts()
         draft = {
@@ -1303,6 +1329,10 @@ def api_accept_draft(draft_id):
         if not draft:
             return jsonify({'success': False, 'error': 'Draft not found or already processed'}), 404
 
+        err = validate_draft_for_accept(draft)
+        if err:
+            return jsonify({'success': False, 'error': err}), 400
+
         try:
             txn_id = add_transaction(
                 date_str=draft['date'],
@@ -1311,7 +1341,8 @@ def api_accept_draft(draft_id):
                 sub_category=draft.get('sub_category', ''),
                 account=draft['account'],
                 amount=draft['amount'],
-                txn_type=draft.get('type', 'Expense')
+                txn_type=draft.get('type', 'Expense'),
+                units=draft.get('units')
             )
             draft['status'] = 'accepted'
             save_drafts(drafts)
@@ -1366,7 +1397,7 @@ def api_update_draft(draft_id):
             draft['type'] = 'Expense'
 
         # Update fingerprint if amount/date/merchant changed
-        draft['fingerprint'] = draft_fingerprint(draft['amount'], draft['date'], draft['merchant'])
+        draft['fingerprint'] = draft_fingerprint(draft['amount'], draft['date'], draft['merchant'], draft.get('account', ''))
         save_drafts(drafts)
     return jsonify({'success': True, 'draft': draft})
 
@@ -1382,7 +1413,13 @@ def api_accept_all_drafts():
             return jsonify({'success': True, 'count': 0, 'txn_ids': []})
 
         txn_ids = []
+        skipped = []
         for draft in pending:
+            err = validate_draft_for_accept(draft)
+            if err:
+                skipped.append({'id': draft.get('id'), 'error': err})
+                app.logger.warning("Skipped draft %s on accept-all: %s", draft.get('id'), err)
+                continue
             try:
                 txn_id = add_transaction(
                     date_str=draft['date'],
@@ -1391,15 +1428,17 @@ def api_accept_all_drafts():
                     sub_category=draft.get('sub_category', ''),
                     account=draft['account'],
                     amount=draft['amount'],
-                    txn_type=draft.get('type', 'Expense')
+                    txn_type=draft.get('type', 'Expense'),
+                    units=draft.get('units')
                 )
                 draft['status'] = 'accepted'
                 txn_ids.append(txn_id)
             except Exception as e:
                 app.logger.warning("Failed to accept draft %s: %s", draft.get('id'), e)
+                skipped.append({'id': draft.get('id'), 'error': 'Failed to create transaction'})
 
         save_drafts(drafts)
-    return jsonify({'success': True, 'count': len(txn_ids), 'txn_ids': txn_ids})
+    return jsonify({'success': True, 'count': len(txn_ids), 'txn_ids': txn_ids, 'skipped': skipped})
 
 
 # ── Settings page ────────────────────────────────────────────────────────────
@@ -1446,7 +1485,8 @@ def api_pipeline_retry(log_id):
     if entry.get('status') not in ('failed',):
         return jsonify({'success': False, 'error': 'Only failed entries can be retried'}), 400
 
-    email_text = entry.get('email_preview', '')
+    # Prefer the full stored email; fall back to the (truncated) preview for old entries
+    email_text = entry.get('email_full') or entry.get('email_preview', '')
     if not email_text:
         return jsonify({'success': False, 'error': 'No email text to retry'}), 400
 
@@ -1467,7 +1507,11 @@ def api_pipeline_retry(log_id):
 
     apply_currency_conversion(parsed)
 
-    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    if parsed.get('currency') != 'INR':
+        log_pipeline_event('failed', 'retry', email_preview=email_text, error='USD->INR conversion failed (rate unavailable)')
+        return jsonify({'success': False, 'error': 'Currency conversion failed; draft not created'}), 422
+
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'], parsed.get('account', ''))
     with _drafts_lock:
         drafts = load_drafts()
         draft = {
@@ -1595,8 +1639,11 @@ def api_test_webhook():
 
     apply_currency_conversion(parsed)
 
+    if parsed.get('currency') != 'INR':
+        return jsonify({'success': False, 'error': 'Currency conversion failed (USD->INR rate unavailable)'}), 422
+
     # Step 3: Create draft
-    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'])
+    fp = draft_fingerprint(parsed['amount'], parsed['date'], parsed['merchant'], parsed.get('account', ''))
     with _drafts_lock:
         drafts = load_drafts()
         draft = {

@@ -6,5 +6,8 @@ venv/
 # Data (back up this folder to migrate)
 data/
 
+# One-off CC rebuild script — contains real transaction data, keep local only
+scripts/rebuild_cc.py
+
 # Environment
 .env

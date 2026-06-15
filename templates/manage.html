@@ -155,16 +155,19 @@
     .draft-card-meta { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
     .draft-card-amount { font-weight: 700; font-size: 1.1rem; color: var(--cc); min-width: 80px; text-align: right; }
     .draft-card-actions { display: flex; gap: 6px; }
-    .draft-card-actions button {
-      padding: 6px 12px; border: none; border-radius: 6px;
-      font-size: 0.8rem; cursor: pointer; font-weight: 500;
+    .draft-card-actions button, .draft-edit-row .draft-btn-accept {
+      padding: 8px 14px; border: none; border-radius: var(--radius);
+      font-family: var(--font-display); font-size: 0.85rem; font-weight: 700;
+      letter-spacing: 0.3px; cursor: pointer; color: #ffffff;
+      transition: all 0.15s;
     }
-    .draft-btn-accept { background: var(--success); color: #fff; }
-    .draft-btn-edit { background: var(--accent); color: #fff; }
-    .draft-btn-reject { background: var(--danger); color: #fff; }
-    .draft-btn-accept:hover { opacity: 0.85; }
-    .draft-btn-edit:hover { opacity: 0.85; }
-    .draft-btn-reject:hover { opacity: 0.85; }
+    .draft-btn-accept { background: var(--success); }
+    .draft-btn-edit { background: var(--accent); }
+    .draft-btn-reject { background: var(--danger); }
+    .draft-card-actions button:hover, .draft-edit-row .draft-btn-accept:hover {
+      filter: brightness(1.08); transform: translateY(-1px);
+    }
+    .draft-card-actions button:active, .draft-edit-row .draft-btn-accept:active { transform: translateY(0); }
 
     .draft-edit-row {
       width: 100%; display: none; padding-top: 10px;
@@ -1927,7 +1930,7 @@
       <div class="draft-card" id="draft-${d.id}">
         <div class="draft-card-info">
           <div class="draft-card-merchant">${esc(d.merchant)}</div>
-          <div class="draft-card-meta">${d.date} · ${esc(d.account)} · ${esc(d.category)} · ${d.type}</div>
+          <div class="draft-card-meta">${esc(d.date)} · ${esc(d.account)} · ${esc(d.category)} · ${esc(d.type)}</div>
         </div>
         <div class="draft-card-amount">₹${Number(d.amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</div>
         <div class="draft-card-actions">
@@ -1939,9 +1942,9 @@
           <label style="font-size:0.75rem;color:var(--muted);width:100%">Merchant</label>
           <input type="text" id="de-merchant-${d.id}" value="${escAttr(d.merchant)}" placeholder="Merchant">
           <label style="font-size:0.75rem;color:var(--muted)">Amount</label>
-          <input type="number" id="de-amount-${d.id}" value="${d.amount}" step="0.01" placeholder="Amount">
+          <input type="number" id="de-amount-${d.id}" value="${Number(d.amount) || 0}" step="0.01" placeholder="Amount">
           <label style="font-size:0.75rem;color:var(--muted)">Date</label>
-          <input type="date" id="de-date-${d.id}" value="${d.date}">
+          <input type="date" id="de-date-${d.id}" value="${escAttr(String(d.date || ''))}">
           <label style="font-size:0.75rem;color:var(--muted)">Account</label>
           <select id="de-account-${d.id}">${acctOptions}</select>
           <label style="font-size:0.75rem;color:var(--muted)">Category</label>
@@ -1979,7 +1982,11 @@
       document.getElementById(`draft-${id}`)?.remove();
       showToast('Transaction saved');
       updateDraftCount(-1);
-      setTimeout(() => location.reload(), 500);  // Bug #2: refresh transaction list
+      // Keep the pending list open; only reload (to sync the transaction list)
+      // once the queue is fully cleared.
+      if (document.querySelectorAll('#draft-list .draft-card').length === 0) {
+        setTimeout(() => location.reload(), 500);
+      }
     } else {
       showToast(data.error || 'Failed to accept', 'error');
     }

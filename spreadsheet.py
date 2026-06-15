@@ -298,6 +298,9 @@ def update_transaction(txn_id, data):
     with _xlsx_lock:
         return _update_transaction_inner(txn_id, data)
 
+def _reverse_type(txn_type):
+    return 'Expense' if txn_type == 'Income' else 'Income'
+
 def _update_transaction_inner(txn_id, data):
     wb = load_workbook()
     result = find_transaction_row(wb, txn_id)
@@ -306,6 +309,15 @@ def _update_transaction_inner(txn_id, data):
 
     sheet_name, row_num = result
     ws = wb[sheet_name]
+
+    # ── Capture OLD values (for investment reversal + carry-over of omitted fields) ──
+    old_account = ws.cell(row=row_num, column=COLUMNS['account']).value
+    old_amount = ws.cell(row=row_num, column=COLUMNS['amount']).value
+    old_type = ws.cell(row=row_num, column=COLUMNS['txn_type']).value or 'Expense'
+    old_track = ws.cell(row=row_num, column=COLUMNS['track']).value
+    parent_id = ws.cell(row=row_num, column=COLUMNS['parent_id']).value
+    old_units_raw = ws.cell(row=row_num, column=COLUMNS['units']).value if COLUMNS['units'] <= ws.max_column else None
+    old_units = float(old_units_raw) if old_units_raw not in (None, '') else None
 
     old_date = ws.cell(row=row_num, column=COLUMNS['date']).value
     new_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
@@ -316,51 +328,59 @@ def _update_transaction_inner(txn_id, data):
     elif old_date is None:
         raise ValueError(f'Transaction {txn_id} has no date')
 
-    if (old_date.year, old_date.month) != (new_date.year, new_date.month):
-        # Cross-month edit: delete from old sheet and add to new sheet
-        parent_id = ws.cell(row=row_num, column=COLUMNS['parent_id']).value
-        ws.delete_rows(row_num)
-        save_workbook(wb)
-        _invalidate_cache()
-
-        # Re-add to the correct month sheet
-        wb2, ws2 = ensure_month_sheet(new_date.year, new_date.month)
-        next_row = DATA_START
-        while ws2.cell(row=next_row, column=COLUMNS['txn_id']).value is not None:
-            next_row += 1
-        ws2.cell(row=next_row, column=COLUMNS['date']).value = new_date
-        ws2.cell(row=next_row, column=COLUMNS['txn_id']).value = txn_id
-        ws2.cell(row=next_row, column=COLUMNS['description']).value = sanitize_cell(data['description'])
-        ws2.cell(row=next_row, column=COLUMNS['category']).value = sanitize_cell(data['category'])
-        ws2.cell(row=next_row, column=COLUMNS['sub_category']).value = sanitize_cell(data.get('sub_category', ''))
-        ws2.cell(row=next_row, column=COLUMNS['account']).value = sanitize_cell(data['account'])
-        ws2.cell(row=next_row, column=COLUMNS['amount']).value = float(data['amount'])
-        ws2.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
-        ws2.cell(row=next_row, column=COLUMNS['txn_type']).value = data.get('type', 'Expense')
-        if 'track' in data:
-            ws2.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if data['track'] else 'No'
-        if 'units' in data and data['units'] is not None:
-            ws2.cell(row=next_row, column=COLUMNS['units']).value = float(data['units'])
-        if parent_id is not None:
-            ws2.cell(row=next_row, column=COLUMNS['parent_id']).value = parent_id
-        save_workbook(wb2)
-        _invalidate_cache()
-        return get_transaction_by_id(txn_id)
-
-    ws.cell(row=row_num, column=COLUMNS['date']).value = new_date
-    ws.cell(row=row_num, column=COLUMNS['description']).value = sanitize_cell(data['description'])
-    ws.cell(row=row_num, column=COLUMNS['category']).value = sanitize_cell(data['category'])
-    ws.cell(row=row_num, column=COLUMNS['sub_category']).value = sanitize_cell(data.get('sub_category', ''))
-    ws.cell(row=row_num, column=COLUMNS['account']).value = sanitize_cell(data['account'])
-    ws.cell(row=row_num, column=COLUMNS['amount']).value = float(data['amount'])
-    ws.cell(row=row_num, column=COLUMNS['amount']).number_format = '₹#,##0.00'
-    ws.cell(row=row_num, column=COLUMNS['txn_type']).value = data.get('type', 'Expense')
-    if 'track' in data:
-        ws.cell(row=row_num, column=COLUMNS['track']).value = 'Yes' if data['track'] else 'No'
+    # ── Resolve final field values (carry over old where the edit omits them) ──
+    new_type = data.get('type', 'Expense')
     if 'units' in data and data['units'] is not None:
-        ws.cell(row=row_num, column=COLUMNS['units']).value = float(data['units'])
+        new_units = float(data['units'])
+    else:
+        new_units = old_units  # preserve existing units when not re-submitted
+    if 'track' in data:
+        new_track = 'Yes' if data['track'] else 'No'
+    else:
+        new_track = old_track if old_track is not None else 'Yes'
+
+    def write_row(sheet, r):
+        sheet.cell(row=r, column=COLUMNS['date']).value = new_date
+        sheet.cell(row=r, column=COLUMNS['txn_id']).value = txn_id
+        sheet.cell(row=r, column=COLUMNS['description']).value = sanitize_cell(data['description'])
+        sheet.cell(row=r, column=COLUMNS['category']).value = sanitize_cell(data['category'])
+        sheet.cell(row=r, column=COLUMNS['sub_category']).value = sanitize_cell(data.get('sub_category', ''))
+        sheet.cell(row=r, column=COLUMNS['account']).value = sanitize_cell(data['account'])
+        sheet.cell(row=r, column=COLUMNS['amount']).value = float(data['amount'])
+        sheet.cell(row=r, column=COLUMNS['amount']).number_format = '₹#,##0.00'
+        sheet.cell(row=r, column=COLUMNS['parent_id']).value = parent_id
+        sheet.cell(row=r, column=COLUMNS['txn_type']).value = new_type
+        sheet.cell(row=r, column=COLUMNS['track']).value = new_track
+        if new_units is not None:
+            sheet.cell(row=r, column=COLUMNS['units']).value = new_units
+
+    if (old_date.year, old_date.month) != (new_date.year, new_date.month):
+        # Cross-month edit — atomic: mutate one workbook, save once.
+        ws.delete_rows(row_num)
+        target_name = month_sheet_name(new_date.year, new_date.month)
+        if target_name not in wb.sheetnames:
+            tws = wb.create_sheet(target_name)
+            _init_sheet(tws)
+            if '_init' in wb.sheetnames:
+                del wb['_init']
+        tws = wb[target_name]
+        next_row = DATA_START
+        while tws.cell(row=next_row, column=COLUMNS['txn_id']).value is not None:
+            next_row += 1
+        write_row(tws, next_row)
+    else:
+        write_row(ws, row_num)
 
     save_workbook(wb)
+
+    # ── Keep investment account (units/cost-basis) consistent after the edit ──
+    # Only parent transactions with units affect the investment account.
+    if parent_id is None:
+        if old_units is not None and old_account:
+            _update_investment_account(old_account, float(old_amount or 0), old_units, _reverse_type(old_type))
+        if new_units is not None and data.get('account'):
+            _update_investment_account(data['account'], float(data['amount']), new_units, new_type)
+
     return get_transaction_by_id(txn_id)
 
 
@@ -475,7 +495,9 @@ def compute_account_balances():
             current = acct['balance'] - spent + earned
             result.append({**acct, 'current_balance': round(current, 2)})
         elif acct['type'] == 'credit':
-            accumulated = spent - earned
+            # opening_balance = amount already owed before the first tracked transaction
+            opening = acct.get('opening_balance', 0)
+            accumulated = opening + spent - earned
             remaining = acct['limit'] - accumulated
             result.append({**acct, 'accumulated': round(accumulated, 2), 'remaining': round(remaining, 2)})
         elif acct['type'] == 'investment':

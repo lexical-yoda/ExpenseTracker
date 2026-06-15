@@ -211,8 +211,24 @@ AMOUNT AND CURRENCY:
 
 CATEGORY — must be one of these exact values, NEVER use "Expense" or "Income" as category:
 {categories}
-- Pick based on merchant: Swiggy/Zomato/restaurant → Dining, Amazon/Flipkart → Shopping, Uber/Ola/IRCTC → Transport, Blinkit/DMart/grocery → Groceries, Netflix/Spotify → Subscriptions, gym/pharmacy → Health
-- If unsure, use "Miscellaneous"
+
+Choose the category from the MERCHANT name using this guide (match keywords case-insensitively):
+- Groceries: Instamart, Swiggy Instamart, Bundl Technologies, Blinkit, Zepto, Blink Commerce, DMart, BigBasket, supermarket, bakery shop, meat, vegetables
+- Dining: Swiggy (food orders), Zomato, Eternal Limited, restaurant, cafe, hotel, eats, kitchen, KFC, Subway, food
+- Transport: Uber, Ola, Rapido, IRCTC, Indian Railways, RedBus, metro, parking, and all fuel/petrol (Petroleum, BPCL, IOC, HP, Fuels)
+- Shopping: Amazon, Flipkart, Myntra, electronics, computers, Apple India, seller services
+- Subscriptions: Netflix, Spotify, YouTube, Prime, Claude, OpenAI, Vultr, DigitalOcean, software, cloud, PayPal
+- Utilities: electricity, water, gas, broadband, JioFiber, Reliance Retail (Jio), Airtel, mobile recharge, PhonePe/BBPS bill payments
+- Health: pharmacy, hospital, clinic, gym, fitness, medical, Heart It Out
+- Entertainment: BookMyShow, movies, PVR, Steam, games
+- Education: Udemy, Coursera, courses, books, stationery
+- Savings & Investment: Groww, Zerodha, SIP, mutual fund, insurance, Policybazaar
+- Miscellaneous: anything not clearly matching above — EMI installments, GST/IGST lines, processing fees, FCY/DCC markups, liquor/beverages (KSBC), and person-to-person UPI transfers
+
+IMPORTANT CATEGORY RULES:
+- "Instamart", "Swiggy Instamart" and "Bundl Technologies" are GROCERIES, even though Swiggy-owned. Only actual food/restaurant orders are Dining.
+- Do NOT default to Dining. Dining is only for prepared food/restaurant orders.
+- When genuinely unsure, use "Miscellaneous" — never use Dining as the fallback.
 
 TYPE:
 - All debits / "used for a transaction" / "spent" → "Expense"

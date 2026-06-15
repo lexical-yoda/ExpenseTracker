@@ -104,6 +104,7 @@ Array of account objects. Three types: `savings`, `credit`, and `investment`.
 - `balance` (savings): Opening balance — the starting amount before any transactions
 - `balance` (investment): Total invested amount (cost basis / principal)
 - `limit` (credit only): Credit limit
+- `opening_balance` (credit only, optional): Amount already owed on the card before the first tracked transaction. Added to accumulated spend in `compute_account_balances()`. Defaults to 0 if absent. Use when tracking starts mid-cycle on a card that already carried a balance.
 - `subtype` (investment only): `"market"` (ETF/stock with live pricing) or `"fd"` (fixed deposit)
 - `ticker` (market only): Yahoo Finance symbol (e.g., `NIFTYBEES.NS`)
 - `units` (market only): Number of units/shares held. Auto-updated when transactions with units are added.
@@ -206,7 +207,7 @@ The Manage page combines the add form and transaction list on a single page.
 1. Click pencil icon on any transaction or sub-item in the list
 2. JS fetches `GET /api/transactions/<id>` to populate edit modal (bottom sheet)
 3. JS sends `PUT /api/transactions/<id>` with CSRF token
-4. **Limitation**: Cannot change date to a different month. Returns error; user must delete and re-add.
+4. Cross-month date edits are supported: if the new date falls in a different month, `update_transaction()` deletes the row from the old sheet and re-creates it (same Txn ID) in the correct month sheet, preserving `parent_id`.
 
 **Deleting:**
 1. Click X icon → confirmation modal (warns about cascade for parents)
@@ -222,7 +223,7 @@ Legacy routes `/add`, `/add/sub/<id>`, and `/expenses` redirect to `/manage` for
 2. Reads ALL parent transactions from the spreadsheet
 3. For each account:
    - **Savings**: `current_balance = opening_balance - (expenses + transfers) + income`
-   - **Credit**: `accumulated = (expenses + transfers) - income`, `remaining = limit - accumulated`
+   - **Credit**: `accumulated = opening_balance + (expenses + transfers) - income`, `remaining = limit - accumulated` (`opening_balance` defaults to 0)
 4. Returns enriched account dicts
 
 **Transfer handling**: Transfers reduce account balances (money moved out) just like expenses, but are excluded from spending summary charts. This avoids double-counting in analytics while keeping balances accurate. CC bill payments should be recorded as: Transfer from savings (money out) + Income on CC account (reduces outstanding).
@@ -234,6 +235,7 @@ Legacy routes `/add`, `/add/sub/<id>`, and `/expenses` redirect to `/manage` for
 - `Expense` on investment account: auto-subtracts units and invested amount
 - The units field appears in the add/edit form only when an investment account is selected
 - `_update_investment_account()` in spreadsheet.py handles the auto-update
+- Editing a transaction also keeps the account consistent: `update_transaction()` reverses the old units/amount and reapplies the new ones (so changing amount/units/type on an investment txn no longer drifts `accounts.json`)
 
 **Investment price fetching**: `fetch_yahoo_price(ticker)` in app.py calls Yahoo Finance's chart API. Returns the `regularMarketPrice` or `None` on failure. Called by `/api/investments/prices` which returns current value, P&L, and percentage for each market investment account.
 
@@ -430,9 +432,9 @@ Accounts cannot be deleted if any transaction references them. The API checks `g
 
 The setup route creates `data/auth.json` (credentials), `data/accounts.json`, and `data/categories.json`. It also generates `.env` with a secret key if missing. Auth is read from `data/auth.json` on every request (no in-memory caching), so changes to the file take effect immediately.
 
-### Cross-month date edits blocked
+### Cross-month date edits supported
 
-`update_transaction()` raises `ValueError` if the new date falls in a different month than the original. This avoids the complexity of moving rows between sheets. Users should delete and re-add instead.
+`update_transaction()` handles a new date in a different month: it deletes the row from the original sheet and re-creates it (same Txn ID, preserving `parent_id`, `units`, and `track`) in the correct month sheet. The move is **atomic** — the delete and re-add happen in one workbook with a single save, so a failure can't lose the row. Same-month edits are updated in place. Omitted `units`/`track` fields are carried over from the existing row rather than cleared.
 
 ### Formula sanitization
 
@@ -523,10 +525,13 @@ All theme colors are in `static/themes.css`. Dashboard chart colors are derived 
 Bank email → User inbox → n8n (or paste) → App webhook/paste API
     → email_parser.strip_email_html() → extracts transaction text
     → email_parser.parse_with_llm() → sends to local LLM → gets JSON
+    → apply_currency_conversion() → USD amounts converted to INR via Yahoo FX rate
     → Draft stored in data/drafts.json (status: pending)
     → User reviews on Manage page → accept/edit/reject
     → Accepted → add_transaction() → real transaction in xlsx
 ```
+
+**Currency conversion**: `apply_currency_conversion()` in app.py converts non-INR (USD) parsed amounts to INR using a Yahoo Finance FX rate for the transaction date, storing `original_amount`/`original_currency`/`fx_rate` on the draft. If the rate fetch fails, the draft is **rejected** (logged as `failed`) rather than storing a raw foreign amount as INR.
 
 ### Key files
 
@@ -540,7 +545,7 @@ Bank email → User inbox → n8n (or paste) → App webhook/paste API
   - `POST /api/drafts/ingest` — CSRF-exempt, API-key auth via `X-API-Key` header. Used by n8n/webhook.
   - `POST /api/drafts/paste` — login + CSRF auth. Used by paste modal on Manage page.
   - `GET /api/drafts` — list pending drafts
-  - `POST /api/drafts/<id>/accept` — creates real transaction via `add_transaction()`
+  - `POST /api/drafts/<id>/accept` — creates real transaction via `add_transaction()`. Validates the draft's `account` and `category` exist first (returns 400 otherwise) so drafts can't create transactions on phantom accounts. Passes through `units` for investment drafts.
   - `POST /api/drafts/<id>/reject` — marks draft as rejected
   - `PUT /api/drafts/<id>` — edit draft fields before accepting
   - `POST /api/drafts/accept-all` — bulk accept all pending
@@ -569,12 +574,12 @@ Bank email → User inbox → n8n (or paste) → App webhook/paste API
     "status": "pending",
     "raw_email_text": "Dear Customer, Rs.450...",
     "created_at": "2026-03-25T14:30:00",
-    "fingerprint": "450.0|2026-03-25|swiggy"
+    "fingerprint": "450.00|2026-03-25|hdfc regalia credit card|swiggy"
   }
 ]
 ```
 
-- `fingerprint` = `amount|date|merchant_lowercase` — used for deduplication
+- `fingerprint` = `amount|date|account_lowercase|merchant_lowercase` — used for deduplication. Amount is formatted to 2 decimals and the account is included so the same amount+date+merchant on two different cards is not wrongly deduped.
 - `status`: `pending` / `accepted` / `rejected`
 - Accepted/rejected drafts older than 30 days are auto-pruned on save
 - Thread-safe via `_drafts_lock` in app.py
@@ -619,15 +624,18 @@ Every email parsing attempt is logged in `data/pipeline_log.json`:
   "status": "success",         // success, failed, skipped, duplicate
   "source": "webhook",         // webhook, paste, retry
   "email_preview": "Dear Customer, Rs.450...",
+  "email_full": "Dear Customer, ... (untruncated, up to 5000 chars)",
   "parsed": {"amount": 450, "merchant": "Swiggy", "date": "2026-03-24", "account": "HDFC Savings"},
   "error": null,
   "draft_id": 5
 }
 ```
 
+`email_preview` is capped at 200 chars for display; `email_full` stores up to 5000 chars so retry re-parses the complete email, not a truncated preview.
+
 **Endpoints:**
 - `GET /api/pipeline/history?status=failed&limit=50` — filtered, newest first
-- `POST /api/pipeline/retry/<log_id>` — retry a failed entry (re-sends to LLM, creates draft on success)
+- `POST /api/pipeline/retry/<log_id>` — retry a failed entry using the stored full email text (re-sends to LLM, creates draft on success)
 - `POST /api/pipeline/clear` — clear all history
 
 **UI:** Settings page has a "Pipeline History" section with filter buttons, status badges, retry buttons, and clear history.
@@ -700,7 +708,6 @@ The app uses Flask's `app.logger` for structured logging. In Docker, all logs ap
 - **No pagination** — all transactions are loaded at once. Will slow down with thousands of entries
 - **Dashboard recomputes on every load** — `compute_account_balances()` reads all transactions every time
 - **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 7 files (setup, login, dashboard, analytics, manage, accounts, settings). Theme CSS/JS is shared via static files.
-- **Cross-month date edits blocked** — must delete and re-add to move a transaction between months
 - **Yahoo Finance dependency** — investment prices rely on an unofficial API that could break. Failures are handled gracefully (shows "Price unavailable")
 - **No investment transaction history** — unit updates are immediate; there's no log of past unit changes separate from the transaction list
 - **FD interest is estimated** — calculated using standard compound interest formula; actual bank interest may differ slightly due to day-count conventions
