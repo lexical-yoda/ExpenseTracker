@@ -48,7 +48,19 @@ def strip_email_html(html: str) -> str | None:
     )
 
     if match:
-        return 'Dear Customer, ' + match.group(1).strip()
+        extracted = 'Dear Customer, ' + match.group(1).strip()
+        # New HDFC emails append fraud/block instructions after the transaction line.
+        # Truncate at the first boilerplate marker to keep only the transaction sentence.
+        boilerplate_markers = [
+            'To check your', 'Important Note', 'What You Can Do',
+            'If you did not authorise', 'If you did not authorize',
+            'UPI transaction reference', 'Need Help?',
+        ]
+        for marker in boilerplate_markers:
+            idx = extracted.find(marker)
+            if idx != -1:
+                extracted = extracted[:idx].strip()
+        return extracted
 
     return None
 
@@ -70,7 +82,8 @@ def parse_with_llm(email_text: str, llm_url: str, system_prompt: str, timeout: i
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': email_text}
         ],
-        'temperature': 0
+        'temperature': 0,
+        'max_tokens': 200
     }
 
     try:
@@ -199,7 +212,7 @@ ACCOUNT IDENTIFICATION — this is the most important rule:
 - NEVER use "VPA", "UPI", "IMAP", or any other value — only the mapped account names
 
 MERCHANT NAME:
-- HDFC UPI: "to VPA someaddress@bank MERCHANT NAME on DD-MM-YY" — extract only the merchant after the VPA address
+- HDFC UPI: "towards VPA someaddress@bank (MERCHANT NAME) on DD-MM-YY" — extract merchant from inside the parentheses. If no parentheses, extract the text after the VPA address and before " on "
 - HDFC CC: "towards MERCHANT on DD Mon, YYYY" — extract merchant after "towards"
 - ICICI CC: "Info: MERCHANT NAME." — extract the text after "Info:" up to the period. Title-case it (e.g., "AMAZON PAY IN E COMMERCE" → "Amazon Pay")
 - Strip prefixes: PYU*, MAB.*, or any VPA/bank identifier (e.g., "PYU*Swiggy Food" → "Swiggy Food")
