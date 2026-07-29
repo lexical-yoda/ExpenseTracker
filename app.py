@@ -1764,6 +1764,14 @@ def api_update_plan_config():
                 'color': str(b.get('color', 'gray')).strip() or 'gray',
             })
 
+        if 'phase1_buckets' in data:
+            if not isinstance(data['phase1_buckets'], dict):
+                return jsonify({'success': False, 'error': 'phase1_buckets must be an object of {bucket_id: ratio}'}), 400
+            phase1_buckets = {str(k): float(v) for k, v in data['phase1_buckets'].items()}
+        else:
+            existing = load_plan()
+            phase1_buckets = existing.get('phase1_buckets') if existing else None
+
         config = {
             'plan_start_date': data.get('plan_start_date') or date.today().strftime('%Y-%m-%d'),
             'phase1_target_total': float(data.get('phase1_target_total', 0)),
@@ -1771,6 +1779,7 @@ def api_update_plan_config():
             'base_income': float(data.get('base_income', 0)),
             'base_expense': float(data.get('base_expense', 0)),
             'buckets': buckets,
+            'phase1_buckets': phase1_buckets,
             'income_growth_pct': float(data.get('income_growth_pct', 0)),
             'expense_growth_pct': float(data.get('expense_growth_pct', 0)),
             'extra_routing': data.get('extra_routing') if data.get('extra_routing') in ('same_ratio', 'savings_only') else 'same_ratio',
