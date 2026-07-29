@@ -29,6 +29,7 @@ COLUMNS = {
     'txn_type': 9,      # I
     'track': 10,        # J — Yes/No, controls dashboard visibility
     'units': 11,        # K — units bought/sold for investment accounts
+    'plan_bucket': 12,  # L — plan-vs-actual bucket id (Income txns only)
 }
 
 TABLE_START = 1  # Column headers row
@@ -91,8 +92,8 @@ def _init_sheet(ws):
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     headers = ['Date', 'Txn ID', 'Description', 'Category', 'Sub-Category',
-               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track', 'Units']
-    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8, 10]
+               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track', 'Units', 'Plan Bucket']
+    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8, 10, 14]
 
     for col, header in enumerate(headers, start=1):
         if not header:
@@ -156,6 +157,9 @@ def parse_row(row, sheet_name):
     units_val = val('units')
     units = float(units_val) if units_val is not None and units_val != '' else None
 
+    plan_bucket_val = val('plan_bucket')
+    plan_bucket = str(plan_bucket_val) if plan_bucket_val not in (None, '') else None
+
     return {
         'id': txn_id,
         'date': date_str,
@@ -168,6 +172,7 @@ def parse_row(row, sheet_name):
         'type': txn_type or 'Expense',
         'track': tracked,
         'units': units,
+        'plan_bucket': plan_bucket,
         'sheet': sheet_name,
     }
 
@@ -211,7 +216,7 @@ def get_transaction_by_id(txn_id):
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
-def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None):
+def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None, plan_bucket=None):
     """Append a transaction to the correct month sheet. Returns txn_id."""
     with _xlsx_lock:
         d = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -239,6 +244,8 @@ def add_transaction(date_str, description, category, sub_category, account, amou
         ws_fresh.cell(row=next_row, column=COLUMNS['track']).value = 'Yes' if track else 'No'
         if units is not None:
             ws_fresh.cell(row=next_row, column=COLUMNS['units']).value = units
+        if plan_bucket:
+            ws_fresh.cell(row=next_row, column=COLUMNS['plan_bucket']).value = sanitize_cell(plan_bucket)
         ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
 
         save_workbook(wb)
@@ -318,6 +325,7 @@ def _update_transaction_inner(txn_id, data):
     parent_id = ws.cell(row=row_num, column=COLUMNS['parent_id']).value
     old_units_raw = ws.cell(row=row_num, column=COLUMNS['units']).value if COLUMNS['units'] <= ws.max_column else None
     old_units = float(old_units_raw) if old_units_raw not in (None, '') else None
+    old_plan_bucket = ws.cell(row=row_num, column=COLUMNS['plan_bucket']).value if COLUMNS['plan_bucket'] <= ws.max_column else None
 
     old_date = ws.cell(row=row_num, column=COLUMNS['date']).value
     new_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
@@ -338,6 +346,10 @@ def _update_transaction_inner(txn_id, data):
         new_track = 'Yes' if data['track'] else 'No'
     else:
         new_track = old_track if old_track is not None else 'Yes'
+    if 'plan_bucket' in data:
+        new_plan_bucket = data['plan_bucket'] or None
+    else:
+        new_plan_bucket = old_plan_bucket or None
 
     def write_row(sheet, r):
         sheet.cell(row=r, column=COLUMNS['date']).value = new_date
@@ -353,6 +365,7 @@ def _update_transaction_inner(txn_id, data):
         sheet.cell(row=r, column=COLUMNS['track']).value = new_track
         if new_units is not None:
             sheet.cell(row=r, column=COLUMNS['units']).value = new_units
+        sheet.cell(row=r, column=COLUMNS['plan_bucket']).value = sanitize_cell(new_plan_bucket) if new_plan_bucket else None
 
     if (old_date.year, old_date.month) != (new_date.year, new_date.month):
         # Cross-month edit — atomic: mutate one workbook, save once.

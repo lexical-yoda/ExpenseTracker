@@ -166,6 +166,7 @@
     <a href="/analytics">Analytics</a>
     <a href="/manage">Manage</a>
     <a href="/accounts">Accounts</a>
+    <a href="/plan">Plan</a>
     <a href="/settings" class="active">Settings</a>
     <a href="/logout" class="nav-logout" onclick="event.preventDefault();fetch('/logout',{method:'POST',headers:{'X-CSRFToken':document.querySelector('meta[name=csrf-token]').content}}).then(()=>location.href='/login')">Log Out</a>
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
@@ -441,6 +442,107 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- INVESTMENT PLAN                                                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Investment Plan</div>
+    <div class="section-desc">Define your monthly allocation plan across buckets. Tag Income transactions with a bucket on the Manage page to track progress on the <a href="/plan" style="color:var(--accent);">Plan page</a>. Read-only tracking — no auto-debit, no penalties for skipped months.</div>
+
+    <div class="inline-row">
+      <div class="field">
+        <label>Plan Start Date</label>
+        <input type="date" id="plan-start-date" value="{{ plan_config.plan_start_date }}">
+      </div>
+      <div class="field">
+        <label>Monthly Base</label>
+        <input type="number" id="plan-monthly-base" value="{{ plan_config.monthly_base }}" step="0.01">
+      </div>
+      <div class="field">
+        <label>Phase 1 Target Total</label>
+        <input type="number" id="plan-phase1-total" value="{{ plan_config.phase1_target_total }}" step="0.01">
+      </div>
+    </div>
+
+    <div class="inline-row">
+      <div class="field">
+        <label>Base Monthly Income</label>
+        <input type="number" id="plan-base-income" value="{{ plan_config.base_income }}" step="0.01">
+      </div>
+      <div class="field">
+        <label>Base Monthly Expense</label>
+        <input type="number" id="plan-base-expense" value="{{ plan_config.base_expense }}" step="0.01">
+      </div>
+    </div>
+
+    <div class="inline-row">
+      <div class="field">
+        <label>Income Growth % / Year</label>
+        <input type="number" id="plan-income-growth" value="{{ plan_config.income_growth_pct }}" step="0.1">
+      </div>
+      <div class="field">
+        <label>Expense Growth % / Year</label>
+        <input type="number" id="plan-expense-growth" value="{{ plan_config.expense_growth_pct }}" step="0.1">
+      </div>
+      <div class="field">
+        <label>Extra Surplus Routing</label>
+        <select id="plan-extra-routing">
+          <option value="same_ratio" {{ 'selected' if plan_config.extra_routing == 'same_ratio' }}>Same ratio as buckets</option>
+          <option value="savings_only" {{ 'selected' if plan_config.extra_routing == 'savings_only' }}>All to buffer bucket</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">No-Penalty Mode</div>
+        <div class="toggle-desc">Suppress "behind schedule" styling on the Plan page — informational only</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="plan-no-penalty" {{ 'checked' if plan_config.no_penalty_mode }}>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="section-desc" style="margin-top:16px;">Buckets</div>
+    <table class="mapping-table" id="plan-bucket-table">
+      <thead>
+        <tr>
+          <th>ID</th><th>Label</th><th>Monthly Amount</th><th>Account</th><th>Color</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="plan-bucket-body">
+        {% for b in plan_config.buckets %}
+        <tr>
+          <td><input type="text" class="pb-id" value="{{ b.id }}" placeholder="equity"></td>
+          <td><input type="text" class="pb-label" value="{{ b.label }}" placeholder="Core equity"></td>
+          <td><input type="number" class="pb-amount" value="{{ b.amount }}" step="0.01"></td>
+          <td>
+            <select class="pb-account">
+              <option value="">— None (e.g. FD top-up) —</option>
+              {% for acct in accounts %}
+              <option value="{{ acct.id }}" {{ 'selected' if acct.id == b.account_id }}>{{ acct.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select class="pb-color">
+              {% for c in ['blue','amber','green','pink','gray'] %}
+              <option value="{{ c }}" {{ 'selected' if c == b.color }}>{{ c }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><button class="remove-btn" onclick="this.closest('tr').remove()">×</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button class="btn btn-outline" style="margin-top:8px;" onclick="addPlanBucketRow()">+ Add Bucket</button>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="savePlanConfig()">Save Plan</button>
+    </div>
+  </div>
+
   <!-- Pipeline History -->
   <div class="card" style="margin-top:24px;">
     <h2 style="margin-bottom:12px;">Pipeline History</h2>
@@ -673,6 +775,54 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     } catch (err) {
       showToast('Failed to clear: ' + err.message);
     }
+  }
+
+  // ── Investment Plan ──
+  function addPlanBucketRow() {
+    const tbody = document.getElementById('plan-bucket-body');
+    const acctOptions = accountNames.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+    const colorOptions = ['blue', 'amber', 'green', 'pink', 'gray'].map(c => `<option value="${c}">${c}</option>`).join('');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" class="pb-id" placeholder="bucket_id"></td>
+      <td><input type="text" class="pb-label" placeholder="Label"></td>
+      <td><input type="number" class="pb-amount" value="0" step="0.01"></td>
+      <td><select class="pb-account"><option value="">— None (e.g. FD top-up) —</option>${acctOptions}</select></td>
+      <td><select class="pb-color">${colorOptions}</select></td>
+      <td><button class="remove-btn" onclick="this.closest('tr').remove()">×</button></td>`;
+    tbody.appendChild(tr);
+  }
+
+  async function savePlanConfig() {
+    const buckets = Array.from(document.querySelectorAll('#plan-bucket-body tr')).map(row => ({
+      id: row.querySelector('.pb-id').value.trim(),
+      label: row.querySelector('.pb-label').value.trim(),
+      amount: parseFloat(row.querySelector('.pb-amount').value) || 0,
+      account_id: row.querySelector('.pb-account').value || null,
+      color: row.querySelector('.pb-color').value,
+    })).filter(b => b.id);
+
+    const body = {
+      plan_start_date: document.getElementById('plan-start-date').value,
+      monthly_base: parseFloat(document.getElementById('plan-monthly-base').value) || 0,
+      phase1_target_total: parseFloat(document.getElementById('plan-phase1-total').value) || 0,
+      base_income: parseFloat(document.getElementById('plan-base-income').value) || 0,
+      base_expense: parseFloat(document.getElementById('plan-base-expense').value) || 0,
+      income_growth_pct: parseFloat(document.getElementById('plan-income-growth').value) || 0,
+      expense_growth_pct: parseFloat(document.getElementById('plan-expense-growth').value) || 0,
+      extra_routing: document.getElementById('plan-extra-routing').value,
+      no_penalty_mode: document.getElementById('plan-no-penalty').checked,
+      buckets,
+    };
+
+    const resp = await fetch('/api/settings/plan', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    if (data.success) showToast('Plan saved');
+    else showToast(data.error || 'Failed to save', 'error');
   }
 
   // Load history on page load

@@ -185,6 +185,7 @@
     <a href="/analytics">Analytics</a>
     <a href="/manage">Manage</a>
     <a href="/accounts">Accounts</a>
+    <a href="/plan">Plan</a>
     <a href="/settings">Settings</a>
     <a href="/logout" class="nav-logout" onclick="event.preventDefault();fetch('/logout',{method:'POST',headers:{'X-CSRFToken':document.querySelector('meta[name=csrf-token]').content}}).then(()=>location.href='/login')">Log Out</a>
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
@@ -715,11 +716,15 @@
     let stocksTotal = 0;
     let fdTotal = 0;
     let ccDebt = 0;
+    let goalExcluded = 0;
 
     balancesData.forEach(b => {
       if (b.type === 'savings') {
         savingsTotal += (b.current_balance || 0);
         netWorth += (b.current_balance || 0);
+        if (b.exclude_from_networth_goal) {
+          goalExcluded += (b.current_balance || 0);
+        }
       } else if (b.type === 'credit') {
         ccDebt += (b.accumulated || 0);
         netWorth -= (b.accumulated || 0);
@@ -742,11 +747,13 @@
       el.style.color = netWorth >= 0 ? 'var(--success)' : 'var(--danger)';
     }
 
-    // Net worth goal progress
-    const milestone = computeMilestone(netWorth, nwGoalIncrement);
+    // Net worth goal progress — excludes accounts flagged exclude_from_networth_goal
+    // (e.g. a "guilt-free" fun-fund account) even though they still count in netWorth above.
+    const goalNetWorth = netWorth - goalExcluded;
+    const milestone = computeMilestone(goalNetWorth, nwGoalIncrement);
     const prevMilestone = milestone - nwGoalIncrement;
-    const progress = netWorth <= prevMilestone ? 0 : Math.min(100, ((netWorth - prevMilestone) / nwGoalIncrement) * 100);
-    const remaining = milestone - netWorth;
+    const progress = goalNetWorth <= prevMilestone ? 0 : Math.min(100, ((goalNetWorth - prevMilestone) / nwGoalIncrement) * 100);
+    const remaining = milestone - goalNetWorth;
 
     document.getElementById('nw-milestone').textContent = fmt(milestone);
     document.getElementById('nw-progress-bar').style.width = Math.max(0, progress) + '%';

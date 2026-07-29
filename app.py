@@ -18,6 +18,7 @@ from spreadsheet import (
     rename_account_in_sheets, compute_account_balances,
     _accounts_lock
 )
+import plan as plan_lib
 from datetime import date, datetime, timedelta
 
 load_dotenv()
@@ -87,6 +88,8 @@ CATEGORIES_FILE = os.path.join(DATA_DIR, 'categories.json')
 DRAFTS_FILE = os.path.join(DATA_DIR, 'drafts.json')
 EMAIL_CONFIG_FILE = os.path.join(DATA_DIR, 'email_config.json')
 PIPELINE_LOG_FILE = os.path.join(DATA_DIR, 'pipeline_log.json')
+PLAN_FILE = os.path.join(DATA_DIR, 'plan.json')
+NETWORTH_HISTORY_FILE = os.path.join(DATA_DIR, 'networth_history.json')
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -408,6 +411,41 @@ def get_default_email_config():
     }
 
 
+# ── Plan (plan-vs-actual) helpers ────────────────────────────────────────────
+
+def load_plan():
+    """Load data/plan.json. Returns None if not configured yet."""
+    if not os.path.exists(PLAN_FILE):
+        return None
+    try:
+        with open(PLAN_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        app.logger.error("Corrupt plan.json — returning None")
+        return None
+
+def save_plan(config):
+    _atomic_json_write(PLAN_FILE, config)
+
+
+# ── Net worth history helpers ────────────────────────────────────────────────
+
+_networth_lock = threading.Lock()
+
+def load_networth_history():
+    if not os.path.exists(NETWORTH_HISTORY_FILE):
+        return {}
+    try:
+        with open(NETWORTH_HISTORY_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        app.logger.error("Corrupt networth_history.json — returning empty")
+        return {}
+
+def save_networth_history(history):
+    _atomic_json_write(NETWORTH_HISTORY_FILE, history)
+
+
 # ── Pipeline log helpers ─────────────────────────────────────────────────────
 
 _pipeline_lock = threading.Lock()
@@ -477,7 +515,9 @@ def manage():
     draft_count = len([d for d in load_drafts() if d.get('status') == 'pending'])
     email_config = load_email_config()
     llm_enabled = bool(email_config and email_config.get('enabled') and email_config.get('llm_url'))
-    return render_template('manage.html', categories=categories, accounts=accounts, today=today, parent=parent, parents=parents, children=children, draft_count=draft_count, llm_enabled=llm_enabled)
+    plan_config = load_plan()
+    plan_buckets = plan_config['buckets'] if plan_config else []
+    return render_template('manage.html', categories=categories, accounts=accounts, today=today, parent=parent, parents=parents, children=children, draft_count=draft_count, llm_enabled=llm_enabled, plan_buckets=plan_buckets)
 
 
 @app.route('/add')
@@ -498,6 +538,18 @@ def expenses():
     return redirect(url_for('manage'))
 
 
+def snapshot_networth_if_needed():
+    """Record this month's net worth in networth_history.json if not already captured.
+    Called on dashboard load — cheap (one compute_account_balances + cached price fetch)
+    and idempotent per calendar month."""
+    month_key = date.today().strftime('%Y-%m')
+    with _networth_lock:
+        history = load_networth_history()
+        if month_key not in history:
+            history[month_key] = compute_net_worth()
+            save_networth_history(history)
+
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -507,6 +559,7 @@ def dashboard():
     nw_increment, _ = get_nw_goal()
     email_config = load_email_config()
     show_email_setup = not email_config or not email_config.get('enabled')
+    snapshot_networth_if_needed()
     return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, nw_goal_increment=nw_increment, show_email_setup=show_email_setup)
 
 
@@ -523,6 +576,54 @@ def accounts_page():
     accounts = load_accounts()
     balances = compute_account_balances()
     return render_template('accounts.html', accounts=accounts, balances=balances)
+
+
+@app.route('/plan')
+@login_required
+def plan_page():
+    plan_config = load_plan()
+    if not plan_config or not plan_config.get('buckets'):
+        return render_template('plan.html', plan_config=None)
+
+    transactions = get_all_transactions()
+    today = date.today()
+
+    this_target = plan_lib.this_month_target(plan_config, today)
+    this_actual = plan_lib.this_month_actual(transactions, plan_config, today)
+    cum_target = plan_lib.cumulative_target(plan_config, today)
+    cum_actual = plan_lib.cumulative_actual(transactions, plan_config, today)
+    contributed_n, contributed_m = plan_lib.months_contributed(transactions, plan_config, today)
+
+    history = load_networth_history()
+    plan_start_key = plan_config['plan_start_date'][:7]
+    baseline = history.get(plan_start_key)
+    if baseline is None:
+        baseline = history[min(history)] if history else compute_net_worth()
+    projected = plan_lib.trajectory(plan_config, today, baseline_networth=baseline)
+    actual_series = sorted((k, v) for k, v in history.items() if k >= plan_start_key)
+
+    fun_fund_balance = None
+    fun_fund_bucket = next((b for b in plan_config['buckets'] if b['id'] == 'fun_fund'), None)
+    if fun_fund_bucket and fun_fund_bucket.get('account_id') is not None:
+        balances = compute_account_balances()
+        acct = next((b for b in balances if b['id'] == fun_fund_bucket['account_id']), None)
+        if acct:
+            fun_fund_balance = acct.get('current_balance')
+
+    return render_template(
+        'plan.html',
+        plan_config=plan_config,
+        this_target=this_target,
+        this_actual=this_actual,
+        cum_target=cum_target,
+        cum_actual=cum_actual,
+        contributed_n=contributed_n,
+        contributed_m=contributed_m,
+        projected=projected,
+        actual_series=actual_series,
+        fun_fund_balance=fun_fund_balance,
+        fun_fund_bucket=fun_fund_bucket,
+    )
 
 
 # ── API: Transactions ────────────────────────────────────────────────────────
@@ -557,6 +658,7 @@ def api_add_transaction():
             txn_type=txn_type,
             track=data.get('track', True),
             units=units,
+            plan_bucket=data.get('plan_bucket') or None,
         )
         app.logger.info("Transaction created: id=%s desc='%s' amount=%.2f account='%s' type=%s", txn_id, data['description'], float(data['amount']), data['account'], txn_type)
         return jsonify({'success': True, 'id': txn_id})
@@ -950,6 +1052,39 @@ def api_update_nw_goal():
         _atomic_json_write(AUTH_FILE, auth)
         os.chmod(AUTH_FILE, 0o600)
     return jsonify({'success': True, 'increment': increment})
+
+
+def _investment_current_value(acct):
+    """Current market/maturity value of a single investment account, or None if unpriced."""
+    if acct.get('subtype', 'market') == 'fd':
+        fd_data = calculate_fd_value(
+            acct.get('balance', 0), acct.get('interest_rate', 0),
+            acct.get('start_date', ''), acct.get('maturity_date', ''),
+            acct.get('compounding', 'quarterly')
+        )
+        return fd_data['current_value'] if fd_data else None
+    ticker = acct.get('ticker')
+    if not ticker:
+        return None
+    price = fetch_yahoo_price(ticker)
+    return round(acct.get('units', 0) * price, 2) if price else None
+
+
+def compute_net_worth():
+    """Current net worth: savings + investments - CC debt. Same formula as the
+    dashboard's client-side calc (dashboard.html renderNetWorth), computed server-side
+    for net-worth-history snapshots and the /plan trajectory chart."""
+    balances = compute_account_balances()
+    net = 0.0
+    for b in balances:
+        if b['type'] == 'savings':
+            net += b.get('current_balance', 0)
+        elif b['type'] == 'credit':
+            net -= b.get('accumulated', 0)
+        elif b['type'] == 'investment':
+            value = _investment_current_value(b)
+            net += value if value is not None else b.get('invested', 0)
+    return round(net, 2)
 
 
 @app.route('/api/investments/prices', methods=['GET'])
@@ -1443,13 +1578,37 @@ def api_accept_all_drafts():
 
 # ── Settings page ────────────────────────────────────────────────────────────
 
+DEFAULT_PLAN_BUCKETS = [
+    {'id': 'equity', 'label': 'Core equity', 'amount': 0, 'ratio': 0, 'account_id': None, 'color': 'blue'},
+    {'id': 'gold', 'label': 'Gold hedge', 'amount': 0, 'ratio': 0, 'account_id': None, 'color': 'amber'},
+    {'id': 'fd_topup', 'label': 'FD top-up', 'amount': 0, 'ratio': 0, 'account_id': None, 'color': 'green'},
+    {'id': 'fun_fund', 'label': 'Fun fund', 'amount': 0, 'ratio': 0, 'account_id': None, 'color': 'pink'},
+    {'id': 'buffer', 'label': 'Flexible buffer', 'amount': 0, 'ratio': 0, 'account_id': None, 'color': 'gray'},
+]
+
+def get_default_plan():
+    return {
+        'plan_start_date': date.today().strftime('%Y-%m-%d'),
+        'phase1_target_total': 0,
+        'monthly_base': 0,
+        'base_income': 0,
+        'base_expense': 0,
+        'buckets': DEFAULT_PLAN_BUCKETS,
+        'income_growth_pct': 0,
+        'expense_growth_pct': 0,
+        'extra_routing': 'same_ratio',
+        'no_penalty_mode': True,
+    }
+
+
 @app.route('/settings')
 @login_required
 def settings():
     config = load_email_config() or get_default_email_config()
     accounts = load_accounts()
     categories = load_categories()
-    return render_template('settings.html', config=config, accounts=accounts, categories=categories)
+    plan_config = load_plan() or get_default_plan()
+    return render_template('settings.html', config=config, accounts=accounts, categories=categories, plan_config=plan_config)
 
 
 @app.route('/download/n8n-workflow')
@@ -1569,6 +1728,59 @@ def api_update_email_config():
 
     save_email_config(config)
     app.logger.info("Email settings updated: enabled=%s llm_url=%s", config.get('enabled'), config.get('llm_url', ''))
+    return jsonify({'success': True})
+
+
+@app.route('/api/settings/plan', methods=['GET'])
+@login_required
+def api_get_plan_config():
+    return jsonify(load_plan() or get_default_plan())
+
+
+@app.route('/api/settings/plan', methods=['PUT'])
+@login_required
+def api_update_plan_config():
+    data = request.get_json(silent=True) or {}
+
+    try:
+        monthly_base = float(data.get('monthly_base', 0))
+        buckets_in = data.get('buckets', [])
+        if not isinstance(buckets_in, list) or not buckets_in:
+            return jsonify({'success': False, 'error': 'At least one bucket is required'}), 400
+
+        buckets = []
+        for b in buckets_in:
+            bid = str(b.get('id', '')).strip()
+            if not bid:
+                return jsonify({'success': False, 'error': 'Each bucket needs an id'}), 400
+            amount = float(b.get('amount', 0))
+            account_id = b.get('account_id')
+            buckets.append({
+                'id': bid,
+                'label': str(b.get('label', bid)).strip() or bid,
+                'amount': amount,
+                'ratio': round(amount / monthly_base, 6) if monthly_base > 0 else 0,
+                'account_id': int(account_id) if account_id not in (None, '', 'null') else None,
+                'color': str(b.get('color', 'gray')).strip() or 'gray',
+            })
+
+        config = {
+            'plan_start_date': data.get('plan_start_date') or date.today().strftime('%Y-%m-%d'),
+            'phase1_target_total': float(data.get('phase1_target_total', 0)),
+            'monthly_base': monthly_base,
+            'base_income': float(data.get('base_income', 0)),
+            'base_expense': float(data.get('base_expense', 0)),
+            'buckets': buckets,
+            'income_growth_pct': float(data.get('income_growth_pct', 0)),
+            'expense_growth_pct': float(data.get('expense_growth_pct', 0)),
+            'extra_routing': data.get('extra_routing') if data.get('extra_routing') in ('same_ratio', 'savings_only') else 'same_ratio',
+            'no_penalty_mode': bool(data.get('no_penalty_mode', True)),
+        }
+    except (ValueError, TypeError) as e:
+        return jsonify({'success': False, 'error': f'Invalid field value: {e}'}), 400
+
+    save_plan(config)
+    app.logger.info("Plan config updated: start=%s monthly_base=%.2f buckets=%d", config['plan_start_date'], config['monthly_base'], len(config['buckets']))
     return jsonify({'success': True})
 
 

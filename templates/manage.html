@@ -712,6 +712,7 @@
     <a href="/analytics">Analytics</a>
     <a href="/manage" class="active">Manage</a>
     <a href="/accounts">Accounts</a>
+    <a href="/plan">Plan</a>
     <a href="/settings">Settings</a>
     <a href="/logout" class="nav-logout" onclick="event.preventDefault();fetch('/logout',{method:'POST',headers:{'X-CSRFToken':document.querySelector('meta[name=csrf-token]').content}}).then(()=>location.href='/login')">Log Out</a>
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
@@ -819,6 +820,18 @@
           <label for="units">Units</label>
           <input type="number" id="units" placeholder="Number of units bought/sold" step="0.001" min="0" inputmode="decimal">
         </div>
+
+        {% if plan_buckets %}
+        <div class="form-group" id="plan-bucket-group" style="display:none">
+          <label for="plan_bucket">Plan Bucket <span style="color:var(--muted)">(optional)</span></label>
+          <select id="plan_bucket">
+            <option value="">None</option>
+            {% for b in plan_buckets %}
+            <option value="{{ b.id }}">{{ b.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
 
         <hr class="divider">
 
@@ -1062,6 +1075,18 @@
       <input type="number" id="edit-units" step="0.001" min="0" inputmode="decimal">
     </div>
 
+    {% if plan_buckets %}
+    <div class="form-group" id="edit-plan-bucket-group" style="display:none">
+      <label for="edit-plan-bucket">Plan Bucket <span style="color:var(--muted)">(optional)</span></label>
+      <select id="edit-plan-bucket">
+        <option value="">None</option>
+        {% for b in plan_buckets %}
+        <option value="{{ b.id }}">{{ b.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+
     <div class="form-group">
       <label for="edit-category">Category</label>
       <select id="edit-category" required>
@@ -1158,7 +1183,24 @@
   const categories = {{ categories | tojson }};
   const accounts = {{ accounts | tojson }};
   const accountTypes = {};
-  accounts.forEach(a => accountTypes[a.name] = a.type);
+  const accountSubtypes = {};
+  const accountIdByName = {};
+  accounts.forEach(a => {
+    accountTypes[a.name] = a.type;
+    accountSubtypes[a.name] = a.subtype;
+    accountIdByName[a.name] = a.id;
+  });
+
+  const planBuckets = {{ plan_buckets | tojson }};
+  const bucketByAccountId = {};
+  planBuckets.forEach(b => { if (b.account_id != null) bucketByAccountId[b.account_id] = b.id; });
+  const fdBucket = planBuckets.find(b => b.id === 'fd_topup');
+
+  function matchPlanBucket(accountName) {
+    if (accountSubtypes[accountName] === 'fd' && fdBucket) return fdBucket.id;
+    const acctId = accountIdByName[accountName];
+    return acctId != null && bucketByAccountId[acctId] !== undefined ? bucketByAccountId[acctId] : '';
+  }
 
   // Show/hide units field based on selected account type
   const acctSelect = document.getElementById('account');
@@ -1171,8 +1213,25 @@
         unitsGroup.style.display = 'none';
         document.getElementById('units').value = '';
       }
+      const bucketSelect = document.getElementById('plan_bucket');
+      if (bucketSelect) bucketSelect.value = matchPlanBucket(this.value);
     });
   }
+
+  // Show/hide plan bucket field based on selected transaction type (Income only)
+  document.querySelectorAll('input[name="txn_type"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      const bucketGroup = document.getElementById('plan-bucket-group');
+      if (!bucketGroup) return;
+      if (this.checked && this.value === 'Income') {
+        bucketGroup.style.display = 'block';
+        const bucketSelect = document.getElementById('plan_bucket');
+        if (bucketSelect && acctSelect) bucketSelect.value = matchPlanBucket(acctSelect.value);
+      } else if (this.checked) {
+        bucketGroup.style.display = 'none';
+      }
+    });
+  });
 
   let modalMode = 'category'; // 'category' or 'subcategory'
   let deleteTargetId = null;
@@ -1297,6 +1356,7 @@
     const parentIdEl = document.getElementById('parent_id');
     const unitsEl = document.getElementById('units');
     const unitsVal = unitsEl && unitsEl.value ? parseFloat(unitsEl.value) : null;
+    const bucketEl = document.getElementById('plan_bucket');
     const payload = {
       date: document.getElementById('date').value,
       description: document.getElementById('description').value,
@@ -1307,6 +1367,7 @@
       parent_id: parentIdEl ? parseInt(parentIdEl.value) : null,
       type: document.querySelector('input[name="txn_type"]:checked').value,
       units: unitsVal,
+      plan_bucket: bucketEl ? (bucketEl.value || null) : null,
     };
 
     try {
@@ -1633,6 +1694,19 @@
       document.getElementById('edit-units').value = '';
     }
 
+    // Show plan bucket field if Income
+    const editBucketGroup = document.getElementById('edit-plan-bucket-group');
+    const editBucketSelect = document.getElementById('edit-plan-bucket');
+    if (editBucketGroup) {
+      if (txn.type === 'Income') {
+        editBucketGroup.style.display = 'block';
+        editBucketSelect.value = txn.plan_bucket || '';
+      } else {
+        editBucketGroup.style.display = 'none';
+        editBucketSelect.value = '';
+      }
+    }
+
     document.getElementById('edit-title').textContent = txn.parent_id ? 'Edit Sub-item' : 'Edit Transaction';
     document.getElementById('edit-modal').classList.add('open');
   }
@@ -1649,6 +1723,16 @@
       editUnitsGroup.style.display = 'none';
       document.getElementById('edit-units').value = '';
     }
+    const editBucketSelect = document.getElementById('edit-plan-bucket');
+    if (editBucketSelect) editBucketSelect.value = matchPlanBucket(this.value);
+  });
+
+  document.querySelectorAll('input[name="edit-type"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      const editBucketGroup = document.getElementById('edit-plan-bucket-group');
+      if (!editBucketGroup) return;
+      editBucketGroup.style.display = (this.checked && this.value === 'Income') ? 'block' : 'none';
+    });
   });
 
   document.getElementById('edit-save-btn').addEventListener('click', async function() {
@@ -1659,6 +1743,7 @@
     const txnId = document.getElementById('edit-txn-id').value;
     const editUnitsEl = document.getElementById('edit-units');
     const editUnitsVal = editUnitsEl && editUnitsEl.value ? parseFloat(editUnitsEl.value) : null;
+    const editBucketEl = document.getElementById('edit-plan-bucket');
     const payload = {
       date: document.getElementById('edit-date').value,
       description: document.getElementById('edit-desc').value,
@@ -1668,6 +1753,7 @@
       sub_category: document.getElementById('edit-subcategory').value,
       type: document.querySelector('input[name="edit-type"]:checked').value,
       units: editUnitsVal,
+      plan_bucket: editBucketEl ? (editBucketEl.value || null) : null,
     };
 
     try {
