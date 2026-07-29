@@ -174,14 +174,19 @@ def months_contributed(transactions, plan, as_of_date=None):
 
 
 def trajectory(plan, as_of_date=None, baseline_networth=0):
-    """Cumulative projected net worth per elapsed month, assuming every monthly
-    target was hit. Returns list of (month_key, projected_networth)."""
+    """Cumulative projected net worth per COMPLETED elapsed month, assuming every
+    monthly target was hit. The current, still-in-progress month is excluded —
+    its target hasn't had a chance to be realized yet, so including it would
+    make the projection jump a full month ahead of reality on day one of a new
+    plan (or right after any plan_start_date change). Returns list of
+    (month_key, projected_networth)."""
     if 'plan_start_date' not in plan:
         return []
     start = _parse_date(plan['plan_start_date'])
+    completed_offsets = elapsed_month_offsets(plan, as_of_date)[:-1]
     running = baseline_networth
     out = []
-    for offset in elapsed_month_offsets(plan, as_of_date):
+    for offset in completed_offsets:
         year, month = _add_months(start.year, start.month, offset)
         running += sum(monthly_target(plan, offset).values())
         out.append((_month_key(year, month), running))

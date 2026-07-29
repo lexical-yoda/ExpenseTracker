@@ -122,9 +122,21 @@ def test_months_contributed():
     assert m == 3
 
 
-def test_trajectory_starts_from_baseline():
+def test_trajectory_excludes_in_progress_month():
+    # Only the plan's start month has elapsed so far — nothing is "completed" yet,
+    # so the trajectory shouldn't assume that month's target already happened.
     traj = plan.trajectory(SAMPLE_PLAN, date(2026, 8, 15), baseline_networth=100000)
+    assert traj == []
+
+
+def test_trajectory_includes_completed_months_only():
+    # As of Sep 15: Aug (offset 0) is complete, Sep (offset 1) is still in progress.
+    traj = plan.trajectory(SAMPLE_PLAN, date(2026, 9, 15), baseline_networth=100000)
     assert len(traj) == 1
     month_key, value = traj[0]
     assert month_key == '2026-08'
     assert value == 100000 + sum(plan.monthly_target(SAMPLE_PLAN, 0).values())
+
+    # As of Oct 15: Aug and Sep are both complete now, Oct is in progress.
+    traj2 = plan.trajectory(SAMPLE_PLAN, date(2026, 10, 15), baseline_networth=100000)
+    assert [m for m, _ in traj2] == ['2026-08', '2026-09']
