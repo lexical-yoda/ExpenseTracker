@@ -78,11 +78,17 @@ def test_elapsed_month_offsets():
     assert plan.elapsed_month_offsets(SAMPLE_PLAN, date(2026, 7, 1)) == []
 
 
-def test_cumulative_target_sums_elapsed_months():
-    cum = plan.cumulative_target(SAMPLE_PLAN, date(2026, 10, 5))  # offsets 0,1,2
-    expected_buffer = 65000 + 65000 + 10000
+def test_cumulative_target_sums_completed_months_only():
+    # elapsed offsets are 0,1,2 (Aug/Sep/Oct) but Oct (offset 2) is still in
+    # progress as of Oct 5, so only Aug+Sep (both phase 1) should count.
+    cum = plan.cumulative_target(SAMPLE_PLAN, date(2026, 10, 5))
+    expected_buffer = 65000 + 65000
     assert cum['buffer'] == expected_buffer
     assert cum['_total'] > 0
+
+    # Nothing completed yet on day one of the plan.
+    cum_day1 = plan.cumulative_target(SAMPLE_PLAN, date(2026, 8, 15))
+    assert cum_day1 == {'_total': 0}
 
 
 def test_this_month_target_matches_last_elapsed_offset():
@@ -116,10 +122,14 @@ def test_this_month_actual():
 
 
 def test_months_contributed():
+    # Oct (offset 2) is still in progress as of Oct 5, so only Aug+Sep count
+    # as completed months — both have activity, so 2 of 2.
     n, m = plan.months_contributed(SAMPLE_TXNS, SAMPLE_PLAN, date(2026, 10, 5))
-    # activity in Aug (offset 0) and Sep (offset 1), out of 3 elapsed months (Aug/Sep/Oct)
     assert n == 2
-    assert m == 3
+    assert m == 2
+
+    # Nothing completed yet on day one of the plan.
+    assert plan.months_contributed(SAMPLE_TXNS, SAMPLE_PLAN, date(2026, 8, 15)) == (0, 0)
 
 
 def test_trajectory_excludes_in_progress_month():

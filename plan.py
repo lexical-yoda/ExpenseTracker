@@ -96,11 +96,18 @@ def elapsed_month_offsets(plan, as_of_date=None):
     return list(range(n + 1))
 
 
+def completed_month_offsets(plan, as_of_date=None):
+    """Like elapsed_month_offsets, but excludes the current, still-in-progress
+    month — a month's target isn't "due" until the month is actually over."""
+    return elapsed_month_offsets(plan, as_of_date)[:-1]
+
+
 def cumulative_target(plan, as_of_date=None):
-    """Sum of monthly targets per bucket across all elapsed months. Returns
-    {bucket_id: total, '_total': grand_total}."""
+    """Sum of monthly targets per bucket across all COMPLETED months (the
+    current in-progress month is excluded — see completed_month_offsets).
+    Returns {bucket_id: total, '_total': grand_total}."""
     totals = defaultdict(float)
-    for offset in elapsed_month_offsets(plan, as_of_date):
+    for offset in completed_month_offsets(plan, as_of_date):
         for bid, amt in monthly_target(plan, offset).items():
             totals[bid] += amt
     totals['_total'] = sum(v for k, v in totals.items() if k != '_total')
@@ -159,9 +166,10 @@ def this_month_actual(transactions, plan, as_of_date=None):
 
 
 def months_contributed(transactions, plan, as_of_date=None):
-    """(N, M): N = distinct calendar months with at least one tagged contribution,
-    M = total elapsed months since plan start."""
-    offsets = elapsed_month_offsets(plan, as_of_date)
+    """(N, M): N = distinct completed calendar months with at least one tagged
+    contribution, M = total completed months since plan start. The current,
+    still-in-progress month isn't counted either way yet."""
+    offsets = completed_month_offsets(plan, as_of_date)
     if not offsets:
         return 0, 0
     start = _parse_date(plan['plan_start_date'])
@@ -183,7 +191,7 @@ def trajectory(plan, as_of_date=None, baseline_networth=0):
     if 'plan_start_date' not in plan:
         return []
     start = _parse_date(plan['plan_start_date'])
-    completed_offsets = elapsed_month_offsets(plan, as_of_date)[:-1]
+    completed_offsets = completed_month_offsets(plan, as_of_date)
     running = baseline_networth
     out = []
     for offset in completed_offsets:
