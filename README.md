@@ -2,7 +2,7 @@
 
 ![Expense Manager Banner](screenshots/banner.png)
 
-A self-hosted personal finance tracker with multi-account support, investment tracking, analytics, and automated bank email parsing via local LLM. No database — all data lives in an Excel file.
+A self-hosted personal finance tracker with multi-account support, investment tracking, plan-vs-actual tracking, analytics, and automated bank email parsing via local LLM. No database — all data lives in an Excel file.
 
 Built with Flask, Plotly, and openpyxl.
 
@@ -57,6 +57,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | **Investments** | ETF/stock tracking with live Yahoo Finance prices, P&L, and auto-unit updates on purchase |
 | **Fixed deposits** | Compound interest calculation with maturity countdown |
 | **Net worth** | Savings + investments - CC debt, with configurable milestone goals and progress bar |
+| **Plan vs. Actual** | Define a monthly bucket allocation plan, tag contributions, and track target vs. actual — read-only, no auto-debit, no penalties for skipped months |
 
 ### Quality of Life
 
@@ -95,7 +96,8 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | `/analytics` | Spending trends, category trends, day-of-week patterns, merchant analysis, spending velocity |
 | `/manage` | Add/edit/delete transactions, sub-expenses, draft review, paste email parsing |
 | `/accounts` | Manage accounts — savings, credit cards, ETFs, fixed deposits |
-| `/settings` | LLM config, email automation, webhook, account mapping, custom prompt |
+| `/plan` | Plan vs. Actual — this-month progress bars, cumulative target/actual, net worth trajectory chart |
+| `/settings` | LLM config, email automation, webhook, account mapping, custom prompt, investment plan |
 
 ---
 
@@ -130,6 +132,8 @@ All user data lives in the `data/` folder:
 | `expenses.xlsx` | All transaction data (one sheet per month) |
 | `drafts.json` | Pending email-parsed drafts (auto-created) |
 | `email_config.json` | LLM + webhook config (auto-created via Settings) |
+| `plan.json` | Investment plan buckets/targets (auto-created via Settings → Investment Plan) |
+| `networth_history.json` | Monthly net worth snapshots, used by the Plan trajectory chart (auto-created) |
 
 **To migrate or back up**: copy the entire `data/` folder. The app handles an empty or missing `data/` folder — it shows the setup wizard to start fresh.
 
@@ -150,6 +154,27 @@ All user data lives in the `data/` folder:
 
 ### Net Worth
 The dashboard shows: sum of all savings balances + investment current values - credit card outstanding. A configurable milestone goal with progress bar auto-advances as you hit targets.
+
+---
+
+## Plan vs. Actual Tracking
+
+A read-only progress view for a monthly allocation plan (e.g. "₹60k to equity, ₹15k to gold, ₹15k to FD top-up, ₹30k to a fun fund, ₹10k buffer, every month"). It never auto-debits, schedules, or penalizes a skipped month — it's a mirror, not a budgeting cop.
+
+### Setup
+1. **Settings → Investment Plan** — set a start date, monthly base amount, an optional Phase 1 (emergency-fund) target, and your buckets. Each bucket can optionally link to an account so its Income transactions get pre-tagged automatically.
+2. On **Manage**, when adding an Income transaction to a bucket-linked account (or a Fixed Deposit account for the `fd_topup` bucket), a **Plan Bucket** dropdown appears and pre-selects the matching bucket — override or clear it as needed.
+3. Untagged transactions are unaffected everywhere else in the app (dashboard, analytics, net worth) — tagging is purely additive.
+
+### `/plan` Page
+- **This month** — a progress bar per bucket (actual vs. target for the current calendar month)
+- **Since plan start** — cumulative target vs. actual per bucket, plus "contributed in N of M months" (a completed month only counts once it's actually over — a brand-new plan starts at zero, not a phantom month's worth of "already due")
+- **Trajectory** — actual net worth (from monthly snapshots) vs. a theoretical "if every target was hit" projection, so you can see at a glance whether you're ahead of or behind your own plan
+
+### Notes
+- A one-time Phase 1 (e.g. building an emergency fund) can have its own bucket split, separate from the steady-state monthly ratios
+- Net worth is snapshotted once per calendar month (on dashboard load) into `data/networth_history.json` — the trajectory chart only has real data from whenever this feature was first used, no historical backfill
+- `exclude_from_networth_goal: true` on an account (e.g. a dedicated "fun fund" savings account) excludes it from the net-worth milestone bar specifically, while still counting normally everywhere else
 
 ---
 
@@ -241,6 +266,7 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 ├── app.py                # Flask routes, auth, API endpoints, investment prices
 ├── spreadsheet.py        # openpyxl read/write, balance computation
 ├── email_parser.py       # HTML email stripping + LLM parsing
+├── plan.py               # Plan-vs-actual target/actual calc (pure functions, no Flask)
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -251,11 +277,15 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 │   ├── accounts.json
 │   ├── categories.json
 │   ├── expenses.xlsx
-│   ├── drafts.json       # Auto-created
-│   └── email_config.json # Auto-created via Settings
+│   ├── drafts.json           # Auto-created
+│   ├── email_config.json     # Auto-created via Settings
+│   ├── plan.json             # Auto-created via Settings → Investment Plan
+│   └── networth_history.json # Auto-created (monthly net worth snapshots)
 ├── scripts/
 │   ├── reset_password.py
 │   └── take_screenshots.py
+├── tests/
+│   └── test_plan.py      # pytest — plan-vs-actual target/actual math
 ├── static/
 │   ├── themes.css        # 7 palettes × 2 modes
 │   ├── theme.js          # Theme picker + localStorage
@@ -272,6 +302,7 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
     ├── analytics.html
     ├── manage.html
     ├── accounts.html
+    ├── plan.html
     └── settings.html
 ```
 

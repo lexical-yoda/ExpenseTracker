@@ -22,15 +22,17 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 | Frontend | Vanilla HTML/CSS/JS, Jinja2 templates |
 | Theming | CSS custom properties, 7 palettes × 2 modes |
 | Fonts | Google Fonts — Syne (display) + DM Mono (body) |
+| Testing | pytest — `plan.py` only (pure functions, no Flask app under test) |
 
 ### File Structure
 
 ```
-├── app.py              # Flask routes, auth, API endpoints, CSRF, draft/email/settings APIs
+├── app.py              # Flask routes, auth, API endpoints, CSRF, draft/email/settings/plan APIs
 ├── spreadsheet.py      # openpyxl read/write, balance computation, formula sanitization
 ├── email_parser.py     # HTML email stripping + LLM parsing (no Flask deps, testable standalone)
+├── plan.py             # Plan-vs-actual target/actual calc (pure functions, no Flask deps, unit-tested)
 ├── requirements.txt    # Python dependencies
-├── Dockerfile          # Python 3.10-slim, gunicorn server
+├── Dockerfile          # Python 3.10-slim, gunicorn server — must COPY every top-level .py module used by app.py
 ├── docker-compose.yml  # Single-service compose for deployment
 ├── .env                # Server config only (host, port, secret key — auto-generated)
 ├── .github/
@@ -43,10 +45,14 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 │   ├── expenses.xlsx   # Transaction data (one sheet per month)
 │   ├── drafts.json     # Pending email-parsed draft transactions (auto-created)
 │   ├── email_config.json  # LLM + webhook config (auto-created via Settings page)
-│   └── pipeline_log.json  # Email parsing attempt history (auto-created)
+│   ├── pipeline_log.json  # Email parsing attempt history (auto-created)
+│   ├── plan.json           # Investment plan config (auto-created via Settings → Investment Plan)
+│   └── networth_history.json  # Monthly net worth snapshots, keyed "YYYY-MM" (auto-created)
 ├── scripts/
 │   ├── take_screenshots.py  # Selenium-based screenshot generator for README
 │   └── reset_password.py   # CLI password reset (interactive or -p flag)
+├── tests/
+│   └── test_plan.py    # pytest — plan.py target/actual math, no Flask/app dependency
 ├── screenshots/             # Auto-generated screenshots (dark/light, desktop/mobile)
 ├── static/
 │   ├── themes.css      # All theme definitions + theme picker + mobile nav styles
@@ -64,7 +70,8 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
     ├── analytics.html  # Spending trends, category trends, merchant analysis, velocity
     ├── manage.html     # Add form + transaction list + draft review banner + paste email modal
     ├── accounts.html   # Account management (CRUD)
-    └── settings.html   # LLM config, n8n setup guide, webhook, account mapping, custom prompt
+    ├── plan.html       # Plan-vs-actual: progress bars, cumulative table, trajectory chart
+    └── settings.html   # LLM config, n8n setup guide, webhook, account mapping, custom prompt, investment plan
 ```
 
 ---
@@ -111,6 +118,7 @@ Array of account objects. Three types: `savings`, `credit`, and `investment`.
 - `interest_rate` (FD only): Annual interest rate percentage
 - `start_date` / `maturity_date` (FD only): `YYYY-MM-DD` strings
 - `compounding` (FD only): `"monthly"`, `"quarterly"`, `"half-yearly"`, or `"yearly"`
+- `exclude_from_networth_goal` (any type, optional, default `false`): Excludes this account's balance from the net-worth **milestone bar** calculation specifically (`dashboard.html` `renderNetWorth()`) — the account still counts normally in the headline net worth figure, `/accounts`, CSV export, and everywhere else. Used e.g. for a dedicated "guilt-free spending" savings account that isn't part of a savings goal.
 
 Balances are computed on the fly by `compute_account_balances()` in `spreadsheet.py` which sums all parent transactions per account against the opening balance/limit. Investment accounts return their cost basis; live values are fetched separately via `/api/investments/prices`.
 
@@ -151,6 +159,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 | I | 9 | Type | `"Expense"`, `"Income"`, or `"Transfer"`. NULL treated as Expense |
 | J | 10 | Track | `"Yes"` or `"No"`. Controls dashboard visibility. NULL treated as Yes |
 | K | 11 | Units | Float. Number of units bought/sold for investment account transactions. NULL for non-investment |
+| L | 12 | Plan Bucket | String. Plan-vs-actual bucket id (e.g. `"equity"`) — Income transactions only, optional, NULL if untagged |
 
 ### Transaction hierarchy
 
@@ -188,7 +197,7 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 ### Navigation
 
 - Logo ("Expense Manager") links to `/` which redirects to dashboard (home page)
-- Nav links: `Dashboard`, `Analytics`, `Manage`, `Accounts`, `Settings`, theme picker button, `Log Out`
+- Nav links: `Dashboard`, `Analytics`, `Manage`, `Accounts`, `Plan`, `Settings`, theme picker button, `Log Out`
 - On mobile (< 600px), nav wraps: logo on its own row, links centered below
 
 ### Managing transactions (`/manage`)
@@ -297,6 +306,14 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 |--------|-----|---------|
 | GET | `/api/investments/prices` | Live prices for market investments + FD calculations. Returns current value, P&L, units, and FD maturity info |
 
+### Plan (Plan vs. Actual)
+
+| Method | URL | Purpose |
+|--------|-----|---------|
+| GET | `/api/settings/plan` | Get plan config (or the zeroed-out default if none saved yet) |
+| PUT | `/api/settings/plan` | Save plan config. Body: `{plan_start_date, monthly_base, phase1_target_total, base_income, base_expense, income_growth_pct, expense_growth_pct, extra_routing, no_penalty_mode, buckets[], phase1_buckets}`. Each bucket's `ratio` is derived server-side as `amount / monthly_base` — don't send it. `phase1_buckets` is optional in the payload; if omitted, the existing on-disk value is preserved (not wiped) |
+| GET | `/plan` | The Plan vs. Actual page itself (not a JSON API, but listed here since it's the feature's main entry point) |
+
 ### Other
 
 | Method | URL | Purpose |
@@ -343,7 +360,7 @@ All templates are standalone HTML files (no base template / inheritance). Each i
 
 ### UI Patterns
 
-- **Nav bar**: Sticky top, logo left (links to dashboard), links right: Dashboard, Analytics, Manage, Accounts, Settings, Log Out, theme picker. On mobile, wraps to two rows.
+- **Nav bar**: Sticky top, logo left (links to dashboard), links right: Dashboard, Analytics, Manage, Accounts, Plan, Settings, Log Out, theme picker. On mobile, wraps to two rows.
 - **Forms**: Surface-colored cards, accent-colored focus rings, uppercase labels
 - **Modals**: Bottom-sheet style (slides up from bottom), backdrop blur, close on overlay click
 - **Toasts**: Fixed bottom-center, pill-shaped, auto-dismiss after 2.5s
@@ -410,7 +427,7 @@ Period Summary and Spending Velocity always use absolute current/last month data
 
 ### Spreadsheet column backward compatibility
 
-The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 11 columns (A–K) with no gaps. Type at column I (index 9), Track at column J (index 10), Units at column K (index 11).
+The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 12 columns (A–L) with no gaps. Type at column I (index 9), Track at column J (index 10), Units at column K (index 11), Plan Bucket at column L (index 12). Each of these three optional columns follows the same precedent: append at the end of `COLUMNS` (never insert), so older sheets that predate the column still parse fine via `parse_row()`'s bounds check.
 
 ### `parse_row()` bounds checking
 
@@ -472,6 +489,7 @@ python-dotenv>=1.0.0
 flask-limiter>=3.0.0
 flask-wtf>=1.2.0
 gunicorn>=21.2.0
+pytest>=8.0.0   # dev only — tests/test_plan.py
 ```
 
 ---
@@ -485,14 +503,15 @@ gunicorn>=21.2.0
 3. Include `<link rel="stylesheet" href="/static/themes.css">` in head
 4. Include `<script src="/static/theme.js"></script>` and `<script>initThemePicker();</script>` before `</body>`
 5. Add CSRF meta tag if the page makes fetch() calls
-6. Add nav link in ALL templates' `.nav-links` div (dashboard.html, analytics.html, manage.html, accounts.html, settings.html)
+6. Add nav link in ALL templates' `.nav-links` div (dashboard.html, analytics.html, manage.html, accounts.html, plan.html, settings.html)
+7. **Don't forget `Dockerfile`** — the `COPY app.py spreadsheet.py email_parser.py ...` line lists every top-level `.py` module explicitly; a new module (like `plan.py`) that's imported by `app.py` but missing from that line will crash the container with `ModuleNotFoundError` on boot even though it works fine locally (bit the plan-vs-actual feature on first deploy)
 
 ### Adding a new field to transactions
 
-1. Add column to `COLUMNS` dict in `spreadsheet.py` (pick an unused column index)
+1. Add column to `COLUMNS` dict in `spreadsheet.py` (pick an unused column index, append at the end — never insert, so old sheets keep parsing via the bounds check in `parse_row()`/`val()`)
 2. Update `parse_row()` to read it (with bounds checking)
-3. Update `add_transaction()` to write it (with `sanitize_cell()` for strings)
-4. Update `update_transaction()` to write it
+3. Update `add_transaction()` to write it (with `sanitize_cell()` for strings) — only write the cell if the value is truthy/not-None, matching the `units`/`plan_bucket` precedent
+4. Update `update_transaction()`/`_update_transaction_inner()` to write it — capture the **old** value before overwrite, resolve the **new** value with carry-over-if-omitted logic, and **always write the cell (not just when truthy)** so the field can actually be cleared via an edit — `plan_bucket` originally got this wrong (guarded the write with `if new_value:`, so clearing it silently failed to persist) before being fixed to unconditionally write `sanitize_cell(new_value) if new_value else None`
 5. Update the add form and edit modal in `manage.html`
 6. Update the JS form submission payloads
 
@@ -681,6 +700,77 @@ Stored in `data/auth.json` as `nw_goal_increment`. Updated via `PUT /api/setting
 
 ---
 
+## Plan vs. Actual Tracking
+
+A read-only progress view for a manual, opt-in monthly allocation plan (e.g. "₹60k to equity, ₹15k to gold, ₹15k to FD top-up, ₹30k to a fun fund, ₹10k buffer"). Deliberately has **no** auto-debit, scheduling, or penalty mechanics — see `no_penalty_mode` below.
+
+### Architecture
+
+```
+Settings → Investment Plan → PUT /api/settings/plan → data/plan.json
+Manage → Income txn + Plan Bucket dropdown → plan_bucket column in expenses.xlsx
+/plan route → plan.py (pure calc) + get_all_transactions() + networth_history.json → templates/plan.html
+Dashboard load → snapshot_networth_if_needed() → networth_history.json (once per calendar month)
+```
+
+### `data/plan.json`
+
+```json
+{
+  "plan_start_date": "2026-08-01",
+  "phase1_target_total": 255000,
+  "monthly_base": 130000,
+  "base_income": 176736,
+  "base_expense": 45000,
+  "buckets": [
+    {"id": "equity", "label": "Core equity", "amount": 60000, "ratio": 0.461538, "account_id": 3, "color": "blue"}
+  ],
+  "phase1_buckets": {"buffer": 0.117647, "fd_topup": 0.882353},
+  "income_growth_pct": 18,
+  "expense_growth_pct": 5,
+  "extra_routing": "same_ratio",
+  "no_penalty_mode": true
+}
+```
+
+- `buckets[].account_id`: an `accounts.json` `id` (int), or `null` for buckets with no fixed account (e.g. `fd_topup`, matched by FD subtype instead — see `plan.html`/`manage.html` bucket pre-select logic)
+- `buckets[].ratio`: derived server-side (`amount / monthly_base`) in `api_update_plan_config()` — never trust a client-submitted ratio
+- `phase1_buckets`: optional `{bucket_id: ratio}` split used only during the Phase 1 (emergency-fund) window; falls back to an even split across whichever of `buffer`/`fd_topup` are present (`plan.default_phase1_buckets()`) if omitted
+- `income_growth_pct` / `expense_growth_pct`: applied per completed **plan year** (12-month block from `plan_start_date`), not calendar year — `0` disables escalation entirely
+- `no_penalty_mode`: currently informational only — there is no "behind schedule" red styling anywhere to suppress in the first place (by design), so this flag has no functional branch yet in `plan.html`
+
+### `plan.py` — pure functions (no Flask import, unit-tested in `tests/test_plan.py`)
+
+| Function | Purpose |
+|---|---|
+| `phase1_month_count(plan)` | `ceil(phase1_target_total / monthly_base)` |
+| `monthly_target(plan, month_offset)` | Target per bucket for one 0-based month offset since `plan_start_date` — phase 1 split or phase 2 ratios + income/expense-growth-driven "extra" |
+| `elapsed_month_offsets(plan, as_of_date)` | `[0..N]` inclusive — every month touched so far, **including** the current in-progress one |
+| `completed_month_offsets(plan, as_of_date)` | `elapsed_month_offsets(...)[:-1]` — excludes the current in-progress month. **Use this, not `elapsed_month_offsets`, for anything that shouldn't assume a not-yet-finished month's target already happened** (cumulative target, trajectory, months-contributed denominator) |
+| `cumulative_target(plan, as_of_date)` | Sum of monthly targets over `completed_month_offsets` |
+| `cumulative_actual(transactions, plan, as_of_date)` | Sum of real tagged Income transactions since `plan_start_date` through `as_of_date` — **not** offset-based, so it reflects real contributions immediately even mid-month |
+| `this_month_target` / `this_month_actual` | Current calendar month only, for the "This Month" progress bars — intentionally *not* gated by completion, since that section is meant to show live in-progress status |
+| `months_contributed(transactions, plan, as_of_date)` | `(N, M)` — completed months with ≥1 tagged contribution, out of total completed months |
+| `trajectory(plan, as_of_date, baseline_networth)` | `[(month_key, projected_networth), ...]` over `completed_month_offsets` only |
+
+**Why `completed_month_offsets` exists:** an earlier version summed over `elapsed_month_offsets` (including the current month) everywhere, so a brand-new plan — or a `plan_start_date` change to today — instantly showed a full month's target as "already due" and the trajectory chart showed projected net worth jumping ahead of actual by a full month's contribution, before any time had passed to act on it. Fixed by excluding the in-progress month from every target/projection calc; `cumulative_actual` and `this_month_*` were left untouched since they reflect real, live data rather than a target/goal.
+
+### Net worth history (`data/networth_history.json`)
+
+```json
+{"2026-07": 235462.44, "2026-08": 344867.0}
+```
+
+- Written by `snapshot_networth_if_needed()` (app.py, called from the `/dashboard` route) — one entry per calendar month, computed via `compute_net_worth()` (savings + live investment/FD values − CC debt, same formula as the dashboard's client-side `renderNetWorth()`, but server-side so it's usable outside a browser session)
+- Idempotent — does nothing if the current month's key already exists
+- No backfill: history only starts accumulating from whenever a dashboard load first happens after this feature shipped. The trajectory chart's "actual" line is only as long as this file's history.
+
+### `/plan` route pre-existing-plan handling
+
+If `data/plan.json` doesn't exist or has no buckets, `plan_page()` renders `plan.html` with `plan_config=None`, which shows an empty-state pointing to Settings — no crash, no special-casing needed elsewhere.
+
+---
+
 ## Logging
 
 The app uses Flask's `app.logger` for structured logging. In Docker, all logs appear in `docker logs expense-manager`.
@@ -707,7 +797,10 @@ The app uses Flask's `app.logger` for structured logging. In Docker, all logs ap
 - **Thread-safe but not multi-process safe** — thread locks protect concurrent writes within a single process (gunicorn -w 1). Running multiple workers would require file-level locking
 - **No pagination** — all transactions are loaded at once. Will slow down with thousands of entries
 - **Dashboard recomputes on every load** — `compute_account_balances()` reads all transactions every time
-- **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 7 files (setup, login, dashboard, analytics, manage, accounts, settings). Theme CSS/JS is shared via static files.
+- **No template inheritance** — each template is standalone, so nav/structure changes must be replicated across all 8 files (setup, login, dashboard, analytics, manage, accounts, plan, settings). Theme CSS/JS is shared via static files.
 - **Yahoo Finance dependency** — investment prices rely on an unofficial API that could break. Failures are handled gracefully (shows "Price unavailable")
 - **No investment transaction history** — unit updates are immediate; there's no log of past unit changes separate from the transaction list
 - **FD interest is estimated** — calculated using standard compound interest formula; actual bank interest may differ slightly due to day-count conventions
+- **Plan trajectory has no historical backfill** — `networth_history.json` only starts accumulating from whenever the plan-vs-actual feature is first used; there's no way to reconstruct past months' net worth retroactively
+- **Plan tracking is calendar-month granular, not salary-cycle aware** — "this month" always means the 1st–end-of-calendar-month, regardless of what day salary actually lands; setting `plan_start_date` mid-month means that first partial month still counts as a full "plan month" toward the Phase 1 window
+- **`plan_bucket` tagging only applies to Income transactions** — a `Transfer` into a bucket-linked account (the other half of this app's two-transaction transfer pattern) does not show or use the Plan Bucket dropdown; the actual contribution must be logged as the `Income` leg on the destination account
