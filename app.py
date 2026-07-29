@@ -586,13 +586,14 @@ def plan_page():
         return render_template('plan.html', plan_config=None)
 
     transactions = get_all_transactions()
+    plan_accounts = load_accounts()
     today = date.today()
 
     this_target = plan_lib.this_month_target(plan_config, today)
-    this_actual = plan_lib.this_month_actual(transactions, plan_config, today)
+    this_actual = plan_lib.this_month_actual(transactions, plan_config, today, accounts=plan_accounts)
     cum_target = plan_lib.cumulative_target(plan_config, today)
-    cum_actual = plan_lib.cumulative_actual(transactions, plan_config, today)
-    contributed_n, contributed_m = plan_lib.months_contributed(transactions, plan_config, today)
+    cum_actual = plan_lib.cumulative_actual(transactions, plan_config, today, accounts=plan_accounts)
+    contributed_n, contributed_m = plan_lib.months_contributed(transactions, plan_config, today, accounts=plan_accounts)
 
     history = load_networth_history()
     plan_start_key = plan_config['plan_start_date'][:7]

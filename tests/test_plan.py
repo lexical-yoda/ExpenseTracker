@@ -150,3 +150,38 @@ def test_trajectory_includes_completed_months_only():
     # As of Oct 15: Aug and Sep are both complete now, Oct is in progress.
     traj2 = plan.trajectory(SAMPLE_PLAN, date(2026, 10, 15), baseline_networth=100000)
     assert [m for m, _ in traj2] == ['2026-08', '2026-09']
+
+
+SAMPLE_ACCOUNTS = [
+    {'id': 10, 'name': 'ICICI FD', 'type': 'investment', 'subtype': 'fd', 'balance': 112500, 'start_date': '2026-08-10'},
+    {'id': 11, 'name': 'HDFC FD', 'type': 'investment', 'subtype': 'fd', 'balance': 112500, 'start_date': '2026-09-01'},
+    {'id': 12, 'name': 'Old FD, before plan start', 'type': 'investment', 'subtype': 'fd', 'balance': 999, 'start_date': '2026-07-01'},
+    {'id': 3, 'name': 'NIFTYBEES', 'type': 'investment', 'subtype': 'market', 'balance': 60000, 'ticker': 'NIFTYBEES.NS', 'units': 200},
+]
+
+
+def test_fd_contributions_counted_as_fd_topup_actual():
+    # FDs have no Income transaction (principal is set at account creation) —
+    # only accounts.json's start_date identifies them as plan contributions.
+    cum = plan.cumulative_actual([], SAMPLE_PLAN, date(2026, 10, 5), accounts=SAMPLE_ACCOUNTS)
+    assert cum['fd_topup'] == 112500 + 112500  # both FDs, pre-plan-start one excluded
+    assert cum['_total'] == 225000
+
+
+def test_fd_contribution_scoped_to_month():
+    actual_aug = plan.this_month_actual([], SAMPLE_PLAN, date(2026, 8, 20), accounts=SAMPLE_ACCOUNTS)
+    assert actual_aug == {'fd_topup': 112500}
+    actual_sep = plan.this_month_actual([], SAMPLE_PLAN, date(2026, 9, 20), accounts=SAMPLE_ACCOUNTS)
+    assert actual_sep == {'fd_topup': 112500}
+
+
+def test_fd_booking_counts_toward_months_contributed():
+    n, m = plan.months_contributed([], SAMPLE_PLAN, date(2026, 10, 5), accounts=SAMPLE_ACCOUNTS)
+    assert n == 2  # Aug (ICICI FD) and Sep (HDFC FD) both booked
+    assert m == 2
+
+
+def test_no_fd_bucket_means_no_fd_matching():
+    plan_without_fd_bucket = dict(SAMPLE_PLAN, buckets=[b for b in SAMPLE_PLAN['buckets'] if b['id'] != 'fd_topup'])
+    cum = plan.cumulative_actual([], plan_without_fd_bucket, date(2026, 10, 5), accounts=SAMPLE_ACCOUNTS)
+    assert 'fd_topup' not in cum

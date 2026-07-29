@@ -143,7 +143,33 @@ def _plan_transactions(transactions, plan):
     return out
 
 
-def cumulative_actual(transactions, plan, as_of_date=None):
+def _fd_contributions(accounts, plan, as_of_date=None):
+    """FD principal contributions attributed to the 'fd_topup' bucket, keyed by
+    each FD account's start_date. FDs are booked as brand-new discrete accounts
+    each time (principal set directly at account creation) — there is no Income
+    transaction to tag, so this is the only way to count them as plan
+    contributions. Returns [(date_str, amount), ...]."""
+    if 'plan_start_date' not in plan or not any(b['id'] == 'fd_topup' for b in plan.get('buckets', [])):
+        return []
+    start = _parse_date(plan['plan_start_date'])
+    as_of = as_of_date or date.today()
+    out = []
+    for acct in (accounts or []):
+        if acct.get('type') != 'investment' or acct.get('subtype') != 'fd':
+            continue
+        fd_start = acct.get('start_date')
+        if not fd_start:
+            continue
+        try:
+            fd_date = _parse_date(fd_start)
+        except (ValueError, TypeError):
+            continue
+        if start <= fd_date <= as_of:
+            out.append((fd_start, acct.get('balance', 0)))
+    return out
+
+
+def cumulative_actual(transactions, plan, as_of_date=None, accounts=None):
     """Sum of actual contributions per bucket since plan_start_date through as_of_date.
     Returns {bucket_id: total, '_total': grand_total}."""
     as_of = as_of_date or date.today()
@@ -151,24 +177,30 @@ def cumulative_actual(transactions, plan, as_of_date=None):
     for t in _plan_transactions(transactions, plan):
         if _parse_date(t['date']) <= as_of:
             totals[t['plan_bucket']] += t['amount']
+    for _, amt in _fd_contributions(accounts, plan, as_of_date):
+        totals['fd_topup'] += amt
     totals['_total'] = sum(v for k, v in totals.items() if k != '_total')
     return dict(totals)
 
 
-def this_month_actual(transactions, plan, as_of_date=None):
+def this_month_actual(transactions, plan, as_of_date=None, accounts=None):
     as_of = as_of_date or date.today()
     totals = defaultdict(float)
     for t in _plan_transactions(transactions, plan):
         t_date = _parse_date(t['date'])
         if t_date.year == as_of.year and t_date.month == as_of.month:
             totals[t['plan_bucket']] += t['amount']
+    for fd_date_str, amt in _fd_contributions(accounts, plan, as_of_date):
+        fd_date = _parse_date(fd_date_str)
+        if fd_date.year == as_of.year and fd_date.month == as_of.month:
+            totals['fd_topup'] = totals.get('fd_topup', 0) + amt
     return dict(totals)
 
 
-def months_contributed(transactions, plan, as_of_date=None):
+def months_contributed(transactions, plan, as_of_date=None, accounts=None):
     """(N, M): N = distinct completed calendar months with at least one tagged
-    contribution, M = total completed months since plan start. The current,
-    still-in-progress month isn't counted either way yet."""
+    contribution (or FD booked), M = total completed months since plan start.
+    The current, still-in-progress month isn't counted either way yet."""
     offsets = completed_month_offsets(plan, as_of_date)
     if not offsets:
         return 0, 0
@@ -177,6 +209,8 @@ def months_contributed(transactions, plan, as_of_date=None):
     for t in _plan_transactions(transactions, plan):
         t_date = _parse_date(t['date'])
         months_with_activity.add(_month_offset(start, t_date))
+    for fd_date_str, _ in _fd_contributions(accounts, plan, as_of_date):
+        months_with_activity.add(_month_offset(start, _parse_date(fd_date_str)))
     n = len({o for o in months_with_activity if o in offsets})
     return n, len(offsets)
 
