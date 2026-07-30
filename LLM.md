@@ -57,7 +57,7 @@ A single-user personal expense tracker built with Flask, using an `.xlsx` file a
 ├── static/
 │   ├── themes.css      # All theme definitions + theme picker + mobile nav styles
 │   ├── theme.js        # Theme picker logic, palette/mode switching, localStorage
-│   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, relative timestamps, PWA SW registration
+│   ├── interactions.js # Animated counters, toasts, pull-to-refresh, auto-refresh, relative timestamps, help-icon tooltips, PWA SW registration
 │   ├── sw.js           # Service worker (network-first for data, cache-first for static)
 │   ├── n8n-email-workflow.json  # Importable n8n workflow template for email automation
 │   ├── favicon.svg     # App favicon (SVG)
@@ -159,7 +159,8 @@ One sheet tab per month, named `"March 2026"`, `"April 2026"`, etc. (full month 
 | I | 9 | Type | `"Expense"`, `"Income"`, or `"Transfer"`. NULL treated as Expense |
 | J | 10 | Track | `"Yes"` or `"No"`. Controls dashboard visibility. NULL treated as Yes |
 | K | 11 | Units | Float. Number of units bought/sold for investment account transactions. NULL for non-investment |
-| L | 12 | Plan Bucket | String. Plan-vs-actual bucket id (e.g. `"equity"`) — Income transactions only, optional, NULL if untagged |
+| L | 12 | Plan Bucket | String. Plan-vs-actual bucket id (e.g. `"equity"`) — Income or Transfer transactions only, optional, NULL if untagged |
+| M | 13 | Transfer To | String. Destination account name — Transfer transactions only, optional. When set, the destination account is credited directly (see "One-step transfers" below); when absent, behaves like the old two-transaction convention (source debited only) |
 
 ### Transaction hierarchy
 
@@ -231,11 +232,13 @@ Legacy routes `/add`, `/add/sub/<id>`, and `/expenses` redirect to `/manage` for
 1. Loads accounts from `data/accounts.json`
 2. Reads ALL parent transactions from the spreadsheet
 3. For each account:
-   - **Savings**: `current_balance = opening_balance - (expenses + transfers) + income`
-   - **Credit**: `accumulated = opening_balance + (expenses + transfers) - income`, `remaining = limit - accumulated` (`opening_balance` defaults to 0)
+   - **Savings**: `current_balance = opening_balance - (expenses + transfers) + income + transfer_credits_received`
+   - **Credit**: `accumulated = opening_balance + (expenses + transfers) - income - transfer_credits_received`, `remaining = limit - accumulated` (`opening_balance` defaults to 0)
 4. Returns enriched account dicts
 
-**Transfer handling**: Transfers reduce account balances (money moved out) just like expenses, but are excluded from spending summary charts. This avoids double-counting in analytics while keeping balances accurate. CC bill payments should be recorded as: Transfer from savings (money out) + Income on CC account (reduces outstanding).
+**One-step transfers**: A `Transfer` transaction with `transfer_to_account` set credits that destination account directly — `transfer_credit_by_account` in `compute_account_balances()` sums these separately from `income_by_account`, so an internal transfer never inflates the dashboard's "Total Income" stat. The source account is still debited exactly as before (`spend_by_account`). This lets a CC bill payment or a savings→savings move happen in one transaction instead of two. **Backward compatible**: a `Transfer` with no `transfer_to_account` (every transfer logged before this feature existed) behaves exactly as it always did — source debited, nothing auto-credited, since the user was expected to log a matching `Income` on the destination separately. Transfers (with or without a destination) remain excluded from spending summary charts (`get_monthly_summary()`), same as before.
+
+**Restrictions enforced client-side, not server-side**: the "To Account" dropdown (manage.html) only lists `savings`/`credit` accounts — investment accounts stay on the existing Income+units purchase flow, since a transfer isn't "buying units." The backend only rejects `transfer_to_account == account` (self-transfer); it doesn't enforce the savings/credit-only restriction, so a direct API call could bypass it. This wasn't tightened further since it just means whoever calls the API directly could pick an odd destination — no balance-math corruption results either way (the credit formula treats any account type the same generically).
 
 **Track toggle**: Each transaction has a `track` field (Yes/No). Untracked transactions still affect account balances but are excluded from dashboard charts, stat cards, and spending summaries. Useful for investments, SIP payments, or other planned outflows the user doesn't want in their spending analytics. Toggle is available per-transaction in the Manage page via a dot button (◉). Defaults to tracked (Yes) for new transactions.
 
@@ -262,7 +265,7 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 
 | Method | URL | Purpose |
 |--------|-----|---------|
-| POST | `/api/transactions` | Create transaction. Body: `{date, description, category, sub_category, account, amount, parent_id, type}` |
+| POST | `/api/transactions` | Create transaction. Body: `{date, description, category, sub_category, account, amount, parent_id, type, units, plan_bucket, transfer_to_account}`. `transfer_to_account` only applies when `type: "Transfer"`; rejected with 400 if equal to `account` |
 | GET | `/api/transactions` | List all transactions |
 | GET | `/api/transactions/<id>` | Get single transaction |
 | PUT | `/api/transactions/<id>` | Update transaction. Body: same as POST |
@@ -273,7 +276,7 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 
 | Method | URL | Purpose |
 |--------|-----|---------|
-| GET | `/api/export/csv` | Download transactions as CSV. Query params: `account`, `type`, `category`, `from`, `to`, `parents_only` |
+| GET | `/api/export/csv` | Download transactions as CSV. Query params: `account`, `type`, `category`, `from`, `to`, `parents_only`. Columns: Date, ID, Description, Category, Sub-Category, Account, Transfer To, Amount, Type, Track, Units, Parent ID |
 
 ### Undo
 
@@ -330,7 +333,7 @@ Theme definitions and logic are centralized — not duplicated per template:
 
 - **`static/themes.css`**: All 7 palettes (dark + light = 14 `[data-theme]` blocks), theme picker dropdown styles, theme toggle button styles, mobile nav responsive rules
 - **`static/theme.js`**: `initThemePicker(onChangeCallback)` — creates the dropdown, handles palette/mode switching, persists to localStorage (`em-palette`, `em-mode`)
-- **`static/interactions.js`**: Shared UI utilities loaded on all authenticated pages — animated stat counters (`animateCounter`, `animateStat`), toast notifications (`showToast`), pull-to-refresh (mobile), auto-refresh (60s polling), relative timestamps (`timeAgo`), PWA service worker registration
+- **`static/interactions.js`**: Shared UI utilities loaded on all authenticated pages — animated stat counters (`animateCounter`, `animateStat`), toast notifications (`showToast`), pull-to-refresh (mobile), auto-refresh (60s polling), relative timestamps (`timeAgo`), help-icon tooltips (self-initializing, see below), PWA service worker registration
 
 ### Templates
 
@@ -366,6 +369,8 @@ All templates are standalone HTML files (no base template / inheritance). Each i
 - **Toasts**: Fixed bottom-center, pill-shaped, auto-dismiss after 2.5s
 - **Account indicators**: Colored dots — savings color for savings accounts, cc color for credit accounts
 - **Amount display**: Expenses prefixed with `-`, income with `+` and success color
+- **Help tooltips**: `<span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="...">?</span>` — self-initializing via a single delegated click listener in `interactions.js` (no per-page init call). Click toggles a `.help-popover` anchored above the icon; click elsewhere or Escape closes it. **Must call `e.preventDefault()` on the click** when the icon is inside a `<label for="...">` (common, since most usages sit right after a field label) — otherwise the browser's native label-click-forwarding fires a second synthetic click on the associated form control, which bubbles back to the same delegated listener and immediately closes the popover that was just opened. This is already handled in the shared handler; don't reimplement help icons with a per-element listener that skips it.
+- **Getting-started banner** (`dashboard.html`): same dismiss-and-remember pattern as `email-setup-banner` — `localStorage` flag + conditional server-side render. Shown when `has_activity` is `False` (i.e. `get_all_transactions()` is empty), gone permanently once dismissed or once any transaction exists.
 
 ### Dashboard (`/dashboard` — home page)
 
@@ -427,11 +432,23 @@ Period Summary and Spending Velocity always use absolute current/last month data
 
 ### Spreadsheet column backward compatibility
 
-The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 12 columns (A–L) with no gaps. Type at column I (index 9), Track at column J (index 10), Units at column K (index 11), Plan Bucket at column L (index 12). Each of these three optional columns follows the same precedent: append at the end of `COLUMNS` (never insert), so older sheets that predate the column still parse fine via `parse_row()`'s bounds check.
+The `COLUMNS` dict maps logical names to physical column indices. The spreadsheet has 13 columns (A–M) with no gaps. Type at column I (index 9), Track at column J (index 10), Units at column K (index 11), Plan Bucket at column L (index 12), Transfer To at column M (index 13). Each of these four optional columns follows the same precedent: append at the end of `COLUMNS` (never insert), so older sheets that predate the column still parse fine via `parse_row()`'s bounds check.
 
 ### `parse_row()` bounds checking
 
 Uses `row[idx] if idx < len(row) else None` to handle rows that are shorter than expected (old sheets may have fewer columns).
+
+### Jinja2 `{% set %}` doesn't survive a `{% for %}` — use `namespace()`
+
+A value set with `{% set x = ... %}` **inside** a `{% for %}` loop body does not persist once that loop ends, even if the loop is nested inside another loop that needs the value afterward. This bit `accounts.html`'s account list for a long time: it did a per-account inner loop to find the matching entry in `balances`, `{% set bal = b %}` inside that inner loop — then referenced `bal` *after* the inner loop ended, where it was silently always `None`. Effect: the Accounts page showed each savings account's static opening `balance` field instead of its live `current_balance`, and every credit card showed a hardcoded "Remaining: ₹0.00" regardless of actual usage — for as long as that code existed, until a live browser check (not just an HTTP 200) caught it. Fixed with Jinja's `namespace()` object, which *does* support cross-scope mutation:
+```jinja
+{% set ns = namespace(bal=None) %}
+{% for b in balances %}
+  {% if b.id == acct.id %}{% set ns.bal = b %}{% endif %}
+{% endfor %}
+{% set bal = ns.bal %}
+```
+`manage.html` already did this correctly (`ns.cur_month`/`ns.cur_day` for tracking state across the transaction list loop) — that's the pattern to copy. Rule of thumb: if a `{% set %}` needs to be read outside the `{% for %}` (or outside a nested inner loop) that set it, it needs `namespace()`, not a bare `{% set %}`. A rendered-page check (screenshot or scraped text) is the only thing that actually catches this class of bug — the page returns 200 either way.
 
 ### `data_only=True` for reading
 
@@ -514,6 +531,7 @@ pytest>=8.0.0   # dev only — tests/test_plan.py
 4. Update `update_transaction()`/`_update_transaction_inner()` to write it — capture the **old** value before overwrite, resolve the **new** value with carry-over-if-omitted logic, and **always write the cell (not just when truthy)** so the field can actually be cleared via an edit — `plan_bucket` originally got this wrong (guarded the write with `if new_value:`, so clearing it silently failed to persist) before being fixed to unconditionally write `sanitize_cell(new_value) if new_value else None`
 5. Update the add form and edit modal in `manage.html`
 6. Update the JS form submission payloads
+7. **Also update the transaction list rendering** (both the server-rendered `txn-card` in `manage.html` and the JS-inserted card built after a successful add) and `/api/export/csv`'s header row + row values — `transfer_to_account` shipped with steps 1-6 done but was invisible in both the list and the CSV export until a follow-up pass added it; easy to forget since neither one errors, they just silently omit the new field
 
 ### Adding a new API endpoint
 
@@ -748,7 +766,7 @@ Dashboard load → snapshot_networth_if_needed() → networth_history.json (once
 | `elapsed_month_offsets(plan, as_of_date)` | `[0..N]` inclusive — every month touched so far, **including** the current in-progress one |
 | `completed_month_offsets(plan, as_of_date)` | `elapsed_month_offsets(...)[:-1]` — excludes the current in-progress month. **Use this, not `elapsed_month_offsets`, for anything that shouldn't assume a not-yet-finished month's target already happened** (cumulative target, trajectory, months-contributed denominator) |
 | `cumulative_target(plan, as_of_date)` | Sum of monthly targets over `completed_month_offsets` |
-| `cumulative_actual(transactions, plan, as_of_date)` | Sum of real tagged Income transactions since `plan_start_date` through `as_of_date` — **not** offset-based, so it reflects real contributions immediately even mid-month |
+| `cumulative_actual(transactions, plan, as_of_date, accounts)` | Sum of real tagged Income **or Transfer-with-destination** transactions since `plan_start_date` through `as_of_date`, plus matched FD account principals (see below) — **not** offset-based, so it reflects real contributions immediately even mid-month. A `Transfer` tagged with a bucket but no `transfer_to_account` is ignored — nothing was actually credited anywhere, so it shouldn't count (`_plan_transactions()`) |
 | `this_month_target` / `this_month_actual` | Current calendar month only, for the "This Month" progress bars — intentionally *not* gated by completion, since that section is meant to show live in-progress status |
 | `months_contributed(transactions, plan, as_of_date)` | `(N, M)` — completed months with ≥1 tagged contribution, out of total completed months |
 | `trajectory(plan, as_of_date, baseline_networth)` | `[(month_key, projected_networth), ...]` over `completed_month_offsets` only |
@@ -803,4 +821,4 @@ The app uses Flask's `app.logger` for structured logging. In Docker, all logs ap
 - **FD interest is estimated** — calculated using standard compound interest formula; actual bank interest may differ slightly due to day-count conventions
 - **Plan trajectory has no historical backfill** — `networth_history.json` only starts accumulating from whenever the plan-vs-actual feature is first used; there's no way to reconstruct past months' net worth retroactively
 - **Plan tracking is calendar-month granular, not salary-cycle aware** — "this month" always means the 1st–end-of-calendar-month, regardless of what day salary actually lands; setting `plan_start_date` mid-month means that first partial month still counts as a full "plan month" toward the Phase 1 window
-- **`plan_bucket` tagging only applies to Income transactions** — a `Transfer` into a bucket-linked account (the other half of this app's two-transaction transfer pattern) does not show or use the Plan Bucket dropdown; the actual contribution must be logged as the `Income` leg on the destination account
+- **`plan_bucket` tagging applies to Income and one-step Transfer transactions, not Expense** — resolved the old limitation where only the `Income` leg of a manual two-transaction transfer could be tagged; a one-step `Transfer` with a `transfer_to_account` set can now be tagged directly (see "One-step transfers" above)

@@ -49,7 +49,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | Feature | Description |
 |---------|-------------|
 | **Multi-account tracking** | Savings, credit cards, and investment accounts — each with their own balance logic |
-| **Income, expense & transfers** | Track money in, money out, and money moved between accounts |
+| **Income, expense & transfers** | Track money in, money out, and one-step transfers between your own accounts — pick a destination account and both balances update in a single entry, no separate Income leg needed |
 | **Sub-expenses** | Break down a grocery order or restaurant bill into individual items |
 | **Dashboard** | Stat cards, daily spending chart, cumulative average, category breakdown, account split, month-over-month comparison |
 | **Analytics** | Spending trends over time, day-of-week patterns, top merchants, spending velocity vs previous months |
@@ -72,6 +72,8 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | **Pipeline history** | Full log of every email parsing attempt with status, retry for failures, and clear history |
 | **PWA** | Install on your phone's home screen, works offline for viewing |
 | **Mobile-first** | Responsive layout, no theme flash, pull-to-refresh |
+| **Contextual help** | "?" icons next to non-obvious fields and workflows explain what they do, in place |
+| **Getting-started banner** | Dismissible checklist on the dashboard for first-time users, gone once you've logged a transaction |
 
 ### Security
 
@@ -81,7 +83,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | **CSRF protection** | All forms protected with Flask-WTF tokens |
 | **Formula injection prevention** | Spreadsheet cells are sanitized against injection |
 | **Secure cookies** | HTTPOnly, SameSite=Lax, Secure flag in production |
-| **Setup wizard** | First-time setup creates credentials — no default passwords |
+| **Setup wizard** | First-time setup creates credentials — no default passwords. Add savings, credit, and investment (ETF or FD) accounts right from the wizard |
 
 ---
 
@@ -162,8 +164,8 @@ The dashboard shows: sum of all savings balances + investment current values - c
 A read-only progress view for a monthly allocation plan (e.g. "₹60k to equity, ₹15k to gold, ₹15k to FD top-up, ₹30k to a fun fund, ₹10k buffer, every month"). It never auto-debits, schedules, or penalizes a skipped month — it's a mirror, not a budgeting cop.
 
 ### Setup
-1. **Settings → Investment Plan** — set a start date, monthly base amount, an optional Phase 1 (emergency-fund) target, and your buckets. Each bucket can optionally link to an account so its Income transactions get pre-tagged automatically.
-2. On **Manage**, when adding an Income transaction to a bucket-linked account (or a Fixed Deposit account for the `fd_topup` bucket), a **Plan Bucket** dropdown appears and pre-selects the matching bucket — override or clear it as needed.
+1. **Settings → Investment Plan** — set a start date, monthly base amount, an optional Phase 1 (emergency-fund) target, and your buckets. Each bucket can optionally link to an account so its contributions get pre-tagged automatically.
+2. On **Manage**, when adding an Income transaction (or a Transfer with a bucket-linked destination account) to a bucket-linked account — or a Fixed Deposit account for the `fd_topup` bucket — a **Plan Bucket** dropdown appears and pre-selects the matching bucket. Override or clear it as needed.
 3. Untagged transactions are unaffected everywhere else in the app (dashboard, analytics, net worth) — tagging is purely additive.
 
 ### `/plan` Page
@@ -173,6 +175,7 @@ A read-only progress view for a monthly allocation plan (e.g. "₹60k to equity,
 
 ### Notes
 - A one-time Phase 1 (e.g. building an emergency fund) can have its own bucket split, separate from the steady-state monthly ratios
+- FD top-up contributions don't need tagging at all — booking a new Fixed Deposit account (Accounts page) automatically counts toward the `fd_topup` bucket by its start date, since an FD's principal is set at account creation rather than via a transaction
 - Net worth is snapshotted once per calendar month (on dashboard load) into `data/networth_history.json` — the trajectory chart only has real data from whenever this feature was first used, no historical backfill
 - `exclude_from_networth_goal: true` on an account (e.g. a dedicated "fun fund" savings account) excludes it from the net-worth milestone bar specifically, while still counting normally everywhere else
 
@@ -314,10 +317,11 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 - "Untracked" transactions affect balances but are excluded from charts and stats
 - Transaction IDs are global integers across all months
 - The `.xlsx` is the single source of truth — editable in LibreOffice/Excel
-- CC bill payments: record as a Transfer from savings + Income on the CC account
+- CC bill payments: a single Transfer transaction with a "To Account" destination handles it — no separate Income leg required. (Older transfers logged before this feature still work exactly as before — nothing retroactive.)
 - Investment prices from Yahoo Finance are cached for 5 minutes (~15min market delay)
 - Categories, accounts, and settings are updated live — no restart needed
 - All operations are logged via `app.logger` — visible in `docker logs expense-manager`
+- Accounts page lists accounts grouped by type (savings, then credit, then investment), alphabetical within each group
 
 ---
 
