@@ -30,6 +30,7 @@ COLUMNS = {
     'track': 10,        # J — Yes/No, controls dashboard visibility
     'units': 11,        # K — units bought/sold for investment accounts
     'plan_bucket': 12,  # L — plan-vs-actual bucket id (Income txns only)
+    'transfer_to_account': 13,  # M — destination account for Transfer txns (optional)
 }
 
 TABLE_START = 1  # Column headers row
@@ -92,8 +93,8 @@ def _init_sheet(ws):
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     headers = ['Date', 'Txn ID', 'Description', 'Category', 'Sub-Category',
-               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track', 'Units', 'Plan Bucket']
-    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8, 10, 14]
+               'Account', 'Amount (₹)', 'Parent ID', 'Type', 'Track', 'Units', 'Plan Bucket', 'Transfer To']
+    widths = [12, 8, 28, 16, 16, 24, 14, 10, 10, 8, 10, 14, 24]
 
     for col, header in enumerate(headers, start=1):
         if not header:
@@ -160,6 +161,9 @@ def parse_row(row, sheet_name):
     plan_bucket_val = val('plan_bucket')
     plan_bucket = str(plan_bucket_val) if plan_bucket_val not in (None, '') else None
 
+    transfer_to_val = val('transfer_to_account')
+    transfer_to_account = str(transfer_to_val) if transfer_to_val not in (None, '') else None
+
     return {
         'id': txn_id,
         'date': date_str,
@@ -173,6 +177,7 @@ def parse_row(row, sheet_name):
         'track': tracked,
         'units': units,
         'plan_bucket': plan_bucket,
+        'transfer_to_account': transfer_to_account,
         'sheet': sheet_name,
     }
 
@@ -216,7 +221,7 @@ def get_transaction_by_id(txn_id):
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
-def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None, plan_bucket=None):
+def add_transaction(date_str, description, category, sub_category, account, amount, parent_id=None, txn_type='Expense', track=True, units=None, plan_bucket=None, transfer_to_account=None):
     """Append a transaction to the correct month sheet. Returns txn_id."""
     with _xlsx_lock:
         d = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -246,6 +251,8 @@ def add_transaction(date_str, description, category, sub_category, account, amou
             ws_fresh.cell(row=next_row, column=COLUMNS['units']).value = units
         if plan_bucket:
             ws_fresh.cell(row=next_row, column=COLUMNS['plan_bucket']).value = sanitize_cell(plan_bucket)
+        if transfer_to_account and txn_type == 'Transfer':
+            ws_fresh.cell(row=next_row, column=COLUMNS['transfer_to_account']).value = sanitize_cell(transfer_to_account)
         ws_fresh.cell(row=next_row, column=COLUMNS['amount']).number_format = '₹#,##0.00'
 
         save_workbook(wb)
@@ -326,6 +333,7 @@ def _update_transaction_inner(txn_id, data):
     old_units_raw = ws.cell(row=row_num, column=COLUMNS['units']).value if COLUMNS['units'] <= ws.max_column else None
     old_units = float(old_units_raw) if old_units_raw not in (None, '') else None
     old_plan_bucket = ws.cell(row=row_num, column=COLUMNS['plan_bucket']).value if COLUMNS['plan_bucket'] <= ws.max_column else None
+    old_transfer_to = ws.cell(row=row_num, column=COLUMNS['transfer_to_account']).value if COLUMNS['transfer_to_account'] <= ws.max_column else None
 
     old_date = ws.cell(row=row_num, column=COLUMNS['date']).value
     new_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
@@ -350,6 +358,12 @@ def _update_transaction_inner(txn_id, data):
         new_plan_bucket = data['plan_bucket'] or None
     else:
         new_plan_bucket = old_plan_bucket or None
+    if 'transfer_to_account' in data:
+        new_transfer_to = data['transfer_to_account'] or None
+    else:
+        new_transfer_to = old_transfer_to or None
+    if new_type != 'Transfer':
+        new_transfer_to = None  # only Transfer txns have a destination account
 
     def write_row(sheet, r):
         sheet.cell(row=r, column=COLUMNS['date']).value = new_date
@@ -366,6 +380,7 @@ def _update_transaction_inner(txn_id, data):
         if new_units is not None:
             sheet.cell(row=r, column=COLUMNS['units']).value = new_units
         sheet.cell(row=r, column=COLUMNS['plan_bucket']).value = sanitize_cell(new_plan_bucket) if new_plan_bucket else None
+        sheet.cell(row=r, column=COLUMNS['transfer_to_account']).value = sanitize_cell(new_transfer_to) if new_transfer_to else None
 
     if (old_date.year, old_date.month) != (new_date.year, new_date.month):
         # Cross-month edit — atomic: mutate one workbook, save once.
@@ -492,25 +507,32 @@ def compute_account_balances():
 
     spend_by_account = defaultdict(float)
     income_by_account = defaultdict(float)
+    transfer_credit_by_account = defaultdict(float)
     for t in parents:
         if t['type'] == 'Income':
             income_by_account[t['account']] += t['amount']
         else:
-            # Both Expense and Transfer reduce account balance
+            # Both Expense and Transfer reduce the source account balance
             spend_by_account[t['account']] += t['amount']
+        # A Transfer with a destination credits that account directly — this
+        # is a separate, additive credit, not routed through income_by_account,
+        # so it never inflates "Total Income" stats elsewhere in the app.
+        if t['type'] == 'Transfer' and t.get('transfer_to_account'):
+            transfer_credit_by_account[t['transfer_to_account']] += t['amount']
 
     result = []
     for acct in accounts:
         name = acct['name']
         spent = spend_by_account.get(name, 0)
         earned = income_by_account.get(name, 0)
+        received = transfer_credit_by_account.get(name, 0)
         if acct['type'] == 'savings':
-            current = acct['balance'] - spent + earned
+            current = acct['balance'] - spent + earned + received
             result.append({**acct, 'current_balance': round(current, 2)})
         elif acct['type'] == 'credit':
             # opening_balance = amount already owed before the first tracked transaction
             opening = acct.get('opening_balance', 0)
-            accumulated = opening + spent - earned
+            accumulated = opening + spent - earned - received
             remaining = acct['limit'] - accumulated
             result.append({**acct, 'accumulated': round(accumulated, 2), 'remaining': round(remaining, 2)})
         elif acct['type'] == 'investment':

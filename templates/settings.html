@@ -447,11 +447,13 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <div class="section">
     <div class="section-title">Investment Plan</div>
-    <div class="section-desc">Define your monthly allocation plan across buckets. Tag Income transactions with a bucket on the Manage page to track progress on the <a href="/plan" style="color:var(--accent);">Plan page</a>. Read-only tracking — no auto-debit, no penalties for skipped months.</div>
+    <div class="section-desc">Define your monthly allocation plan across buckets. Tag Income or Transfer transactions with a bucket on the Manage page to track progress on the <a href="/plan" style="color:var(--accent);">Plan page</a>. Read-only tracking — no auto-debit, no penalties for skipped months.</div>
 
     <div class="inline-row">
       <div class="field">
-        <label>Plan Start Date</label>
+        <label>Plan Start Date
+          <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Tracking begins from this date. The month it falls in still counts as a full 'plan month' even if it starts mid-month — set it to the 1st of a month for the cleanest tracking.">?</span>
+        </label>
         <input type="date" id="plan-start-date" value="{{ plan_config.plan_start_date }}">
       </div>
       <div class="field">
@@ -459,7 +461,9 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
         <input type="number" id="plan-monthly-base" value="{{ plan_config.monthly_base }}" step="0.01">
       </div>
       <div class="field">
-        <label>Phase 1 Target Total</label>
+        <label>Phase 1 Target Total
+          <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Optional one-time target (e.g. an emergency fund) funded first, before the steady-state bucket ratios kick in. Leave 0 to skip straight to the regular monthly split.">?</span>
+        </label>
         <input type="number" id="plan-phase1-total" value="{{ plan_config.phase1_target_total }}" step="0.01">
       </div>
     </div>
@@ -485,7 +489,9 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
         <input type="number" id="plan-expense-growth" value="{{ plan_config.expense_growth_pct }}" step="0.1">
       </div>
       <div class="field">
-        <label>Extra Surplus Routing</label>
+        <label>Extra Surplus Routing
+          <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="If your income grows faster than expenses year over year, the extra beyond Monthly Base gets routed either proportionally across all buckets, or entirely into the buffer bucket.">?</span>
+        </label>
         <select id="plan-extra-routing">
           <option value="same_ratio" {{ 'selected' if plan_config.extra_routing == 'same_ratio' }}>Same ratio as buckets</option>
           <option value="savings_only" {{ 'selected' if plan_config.extra_routing == 'savings_only' }}>All to buffer bucket</option>
@@ -504,7 +510,9 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
       </label>
     </div>
 
-    <div class="section-desc" style="margin-top:16px;">Buckets</div>
+    <div class="section-desc" style="margin-top:16px;">Buckets
+      <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Each row is one allocation bucket. Linking a bucket to an Account makes the Plan Bucket dropdown on Manage auto-select it when you tag a transaction to that account.">?</span>
+    </div>
     <table class="mapping-table" id="plan-bucket-table">
       <thead>
         <tr>
@@ -537,6 +545,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
         {% endfor %}
       </tbody>
     </table>
+    <div style="font-size:0.75rem; color:var(--muted); margin-top:8px;">Pick "— None —" for a bucket that isn't tied to one account — e.g. an FD top-up bucket, since each FD you book becomes its own new account rather than topping up an existing one. It's still tracked automatically by matching Fixed Deposit accounts booked after your Plan Start Date.</div>
     <button class="btn btn-outline" style="margin-top:8px;" onclick="addPlanBucketRow()">+ Add Bucket</button>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="savePlanConfig()">Save Plan</button>

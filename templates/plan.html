@@ -113,6 +113,16 @@
     <div class="page-sub">A read-only progress view — no auto-debit, no penalties for skipped months.</div>
   </div>
 
+  <div class="card" style="margin-bottom:20px; font-size:0.82rem; color:var(--muted); line-height:1.7;">
+    <strong style="color:var(--text);">How this works</strong>
+    <ol style="margin:8px 0 0 18px; padding:0;">
+      <li>Set a monthly bucket allocation in <a href="/settings" style="color:var(--accent);">Settings → Investment Plan</a> — e.g. "₹60k to equity, ₹30k to a fun fund"</li>
+      <li>Tag Income or Transfer transactions on <a href="/manage" style="color:var(--accent);">Manage</a> to a bucket — it auto-selects when the account matches</li>
+      <li><strong>This Month</strong> below shows live progress; <strong>Since Plan Start</strong> only counts a month once it's actually over — a brand-new plan starts at zero, not a phantom month's worth of "already due"</li>
+      <li>No auto-debit, no reminders, no penalty for a skipped month — this is a mirror, not a budgeting cop</li>
+    </ol>
+  </div>
+
   {% if not plan_config %}
   <div class="card empty-state">
     No investment plan configured yet. Set one up on the <a href="/settings">Settings page</a> under "Investment Plan".
@@ -128,16 +138,26 @@
   </div>
   {% endif %}
 
-  <div class="section-label">This Month</div>
+  <div class="section-label">This Month
+    <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Live progress for the current calendar month — updates as soon as you tag a transaction, no waiting for the month to end.">?</span>
+  </div>
   <div class="card" id="this-month-card"></div>
 
-  <div class="section-label">Since Plan Start</div>
+  <div class="section-label">Since Plan Start
+    <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Only counts months that have actually finished. A brand-new plan (or one you just changed the start date on) shows zero here until the current month is over — that's expected, not broken.">?</span>
+  </div>
   <div class="card">
     <table class="cum-table" id="cum-table"></table>
+    {% if contributed_m == 0 %}
+    <div class="adherence-stat">Nothing counts until a month completes — check back once this month is over.</div>
+    {% else %}
     <div class="adherence-stat">Contributed in <strong>{{ contributed_n }}</strong> of <strong>{{ contributed_m }}</strong> months since plan start.</div>
+    {% endif %}
   </div>
 
-  <div class="section-label">Trajectory</div>
+  <div class="section-label">Trajectory
+    <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Green line: your real net worth history. Dotted line: what it would be if every monthly target was hit exactly. Only shows completed months — the current month isn't projected until it's over.">?</span>
+  </div>
   <div class="card chart-card">
     <div class="chart-title">Actual vs. Projected Net Worth</div>
     <div class="chart-wrap" id="chart-trajectory" style="height:320px"></div>

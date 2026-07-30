@@ -235,11 +235,60 @@
             <select name="acct_type_0" onchange="toggleAmountField(this)">
               <option value="savings">Savings</option>
               <option value="credit">Credit</option>
+              <option value="investment">Investment</option>
             </select>
           </div>
           <div class="form-group" style="min-width: 140px;">
             <label class="amt-label">Opening Balance</label>
             <input type="number" name="acct_balance_0" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+          </div>
+        </div>
+        <div class="inv-fields" style="display:none">
+          <div class="form-group">
+            <label>Investment Type</label>
+            <select name="acct_subtype_0" onchange="toggleInvestmentFields(this)">
+              <option value="market">ETF / Stock (live price)</option>
+              <option value="fd">Fixed Deposit</option>
+            </select>
+          </div>
+          <div class="inv-market-fields">
+            <div class="acct-row">
+              <div class="form-group">
+                <label>Yahoo Finance Ticker</label>
+                <input type="text" name="acct_ticker_0" placeholder="e.g. NIFTYBEES.NS">
+              </div>
+              <div class="form-group" style="min-width: 100px;">
+                <label>Units Held</label>
+                <input type="number" name="acct_units_0" step="0.001" min="0" placeholder="0">
+              </div>
+            </div>
+          </div>
+          <div class="inv-fd-fields" style="display:none">
+            <div class="acct-row">
+              <div class="form-group">
+                <label>Interest Rate (%)</label>
+                <input type="number" name="acct_interest_rate_0" step="0.01" min="0" placeholder="7.0">
+              </div>
+              <div class="form-group" style="min-width: 130px;">
+                <label>Compounding</label>
+                <select name="acct_compounding_0">
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly" selected>Quarterly</option>
+                  <option value="half-yearly">Half-yearly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </div>
+            </div>
+            <div class="acct-row">
+              <div class="form-group">
+                <label>Start Date</label>
+                <input type="date" name="acct_start_date_0">
+              </div>
+              <div class="form-group">
+                <label>Maturity Date</label>
+                <input type="date" name="acct_maturity_date_0">
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -257,24 +306,35 @@
   function toggleAmountField(selectEl) {
     const entry = selectEl.closest('.acct-entry');
     const idx = entry.dataset.idx;
-    const isCredit = selectEl.value === 'credit';
+    const type = selectEl.value;
     const label = entry.querySelector('.amt-label');
-    const balInput = entry.querySelector(`[name="acct_balance_${idx}"]`);
-    const limInput = entry.querySelector(`[name="acct_limit_${idx}"]`);
+    const balInput = entry.querySelector(`[name="acct_balance_${idx}"], [name="acct_limit_${idx}"]`);
+    const invFields = entry.querySelector('.inv-fields');
 
-    if (isCredit) {
+    if (type === 'credit') {
       label.textContent = 'Credit Limit';
-      if (balInput) {
-        balInput.name = `acct_limit_${idx}`;
-        balInput.placeholder = '0.00';
+      if (balInput) balInput.name = `acct_limit_${idx}`;
+      if (invFields) invFields.style.display = 'none';
+    } else if (type === 'investment') {
+      if (balInput) balInput.name = `acct_balance_${idx}`;
+      if (invFields) {
+        invFields.style.display = 'block';
+        toggleInvestmentFields(invFields.querySelector(`[name="acct_subtype_${idx}"]`), label);
       }
     } else {
       label.textContent = 'Opening Balance';
-      if (limInput) {
-        limInput.name = `acct_balance_${idx}`;
-        limInput.placeholder = '0.00';
-      }
+      if (balInput) balInput.name = `acct_balance_${idx}`;
+      if (invFields) invFields.style.display = 'none';
     }
+  }
+
+  function toggleInvestmentFields(selectEl, labelOverride) {
+    const entry = selectEl.closest('.acct-entry');
+    const isFd = selectEl.value === 'fd';
+    const label = labelOverride || entry.querySelector('.amt-label');
+    entry.querySelector('.inv-market-fields').style.display = isFd ? 'none' : 'block';
+    entry.querySelector('.inv-fd-fields').style.display = isFd ? 'block' : 'none';
+    label.textContent = isFd ? 'Principal' : 'Invested Amount';
   }
 
   document.getElementById('add-acct-btn').addEventListener('click', function() {
@@ -297,11 +357,60 @@
           <select name="acct_type_${idx}" onchange="toggleAmountField(this)">
             <option value="savings">Savings</option>
             <option value="credit">Credit</option>
+            <option value="investment">Investment</option>
           </select>
         </div>
         <div class="form-group" style="min-width: 140px;">
           <label class="amt-label">Opening Balance</label>
           <input type="number" name="acct_balance_${idx}" step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+        </div>
+      </div>
+      <div class="inv-fields" style="display:none">
+        <div class="form-group">
+          <label>Investment Type</label>
+          <select name="acct_subtype_${idx}" onchange="toggleInvestmentFields(this)">
+            <option value="market">ETF / Stock (live price)</option>
+            <option value="fd">Fixed Deposit</option>
+          </select>
+        </div>
+        <div class="inv-market-fields">
+          <div class="acct-row">
+            <div class="form-group">
+              <label>Yahoo Finance Ticker</label>
+              <input type="text" name="acct_ticker_${idx}" placeholder="e.g. NIFTYBEES.NS">
+            </div>
+            <div class="form-group" style="min-width: 100px;">
+              <label>Units Held</label>
+              <input type="number" name="acct_units_${idx}" step="0.001" min="0" placeholder="0">
+            </div>
+          </div>
+        </div>
+        <div class="inv-fd-fields" style="display:none">
+          <div class="acct-row">
+            <div class="form-group">
+              <label>Interest Rate (%)</label>
+              <input type="number" name="acct_interest_rate_${idx}" step="0.01" min="0" placeholder="7.0">
+            </div>
+            <div class="form-group" style="min-width: 130px;">
+              <label>Compounding</label>
+              <select name="acct_compounding_${idx}">
+                <option value="monthly">Monthly</option>
+                <option value="quarterly" selected>Quarterly</option>
+                <option value="half-yearly">Half-yearly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+          </div>
+          <div class="acct-row">
+            <div class="form-group">
+              <label>Start Date</label>
+              <input type="date" name="acct_start_date_${idx}">
+            </div>
+            <div class="form-group">
+              <label>Maturity Date</label>
+              <input type="date" name="acct_maturity_date_${idx}">
+            </div>
+          </div>
         </div>
       </div>
     `;

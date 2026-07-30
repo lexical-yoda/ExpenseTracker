@@ -306,12 +306,13 @@
 
   <div id="acct-list">
     {% for acct in accounts %}
-      {% set bal = None %}
+      {% set ns = namespace(bal=None) %}
       {% for b in balances %}
         {% if b.id == acct.id %}
-          {% set bal = b %}
+          {% set ns.bal = b %}
         {% endif %}
       {% endfor %}
+      {% set bal = ns.bal %}
       {% set dot_class = 'savings' if acct.type == 'savings' else 'investment' if acct.type == 'investment' else 'cc' %}
       <div class="acct-card" data-id="{{ acct.id }}">
         <span class="acct-dot {{ dot_class }}"></span>
@@ -383,7 +384,9 @@
     </div>
 
     <div class="form-group" id="billing-date-group" style="display:none">
-      <label for="acct-billing-date">Billing Cycle Date (day of month)</label>
+      <label for="acct-billing-date">Billing Cycle Date (day of month)
+        <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Optional. Enables the dashboard's billing cycle stats (current cycle spend, projected bill, cycle-over-cycle comparison) for this card. Leave blank to skip those stats.">?</span>
+      </label>
       <input type="number" id="acct-billing-date" min="1" max="31" placeholder="e.g. 14" inputmode="numeric">
     </div>
 

@@ -185,3 +185,25 @@ def test_no_fd_bucket_means_no_fd_matching():
     plan_without_fd_bucket = dict(SAMPLE_PLAN, buckets=[b for b in SAMPLE_PLAN['buckets'] if b['id'] != 'fd_topup'])
     cum = plan.cumulative_actual([], plan_without_fd_bucket, date(2026, 10, 5), accounts=SAMPLE_ACCOUNTS)
     assert 'fd_topup' not in cum
+
+
+def test_transfer_with_bucket_tag_counts_as_actual():
+    # One-step transfer (source -> destination, single row) tagged with a
+    # bucket should count identically to a tagged Income transaction.
+    txns = [
+        {'type': 'Transfer', 'parent_id': None, 'plan_bucket': 'fun_fund', 'date': '2026-08-10',
+         'amount': 30000, 'account': 'HDFC Savings', 'transfer_to_account': 'IDBI Savings Account'},
+    ]
+    actual = plan.cumulative_actual(txns, SAMPLE_PLAN, date(2026, 10, 5))
+    assert actual['fun_fund'] == 30000
+
+
+def test_transfer_without_destination_does_not_count():
+    # A Transfer tagged with a bucket but no transfer_to_account credited
+    # nothing anywhere — shouldn't count as a real contribution.
+    txns = [
+        {'type': 'Transfer', 'parent_id': None, 'plan_bucket': 'fun_fund', 'date': '2026-08-10',
+         'amount': 30000, 'account': 'HDFC Savings', 'transfer_to_account': None},
+    ]
+    actual = plan.cumulative_actual(txns, SAMPLE_PLAN, date(2026, 10, 5))
+    assert actual == {'_total': 0}

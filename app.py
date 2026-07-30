@@ -243,8 +243,20 @@ def setup():
                 acct = {'id': acct_idx + 1, 'name': name, 'type': acct_type}
                 if acct_type == 'savings':
                     acct['balance'] = float(request.form.get(f'acct_balance_{acct_idx}', 0) or 0)
-                else:
+                elif acct_type == 'credit':
                     acct['limit'] = float(request.form.get(f'acct_limit_{acct_idx}', 0) or 0)
+                elif acct_type == 'investment':
+                    subtype = request.form.get(f'acct_subtype_{acct_idx}', 'market')
+                    acct['subtype'] = subtype
+                    acct['balance'] = float(request.form.get(f'acct_balance_{acct_idx}', 0) or 0)
+                    if subtype == 'fd':
+                        acct['interest_rate'] = float(request.form.get(f'acct_interest_rate_{acct_idx}', 0) or 0)
+                        acct['start_date'] = request.form.get(f'acct_start_date_{acct_idx}', '')
+                        acct['maturity_date'] = request.form.get(f'acct_maturity_date_{acct_idx}', '')
+                        acct['compounding'] = request.form.get(f'acct_compounding_{acct_idx}', 'quarterly')
+                    else:
+                        acct['ticker'] = request.form.get(f'acct_ticker_{acct_idx}', '').strip()
+                        acct['units'] = float(request.form.get(f'acct_units_{acct_idx}', 0) or 0)
                 accounts.append(acct)
                 acct_idx += 1
 
@@ -559,8 +571,9 @@ def dashboard():
     nw_increment, _ = get_nw_goal()
     email_config = load_email_config()
     show_email_setup = not email_config or not email_config.get('enabled')
+    has_activity = bool(get_all_transactions())
     snapshot_networth_if_needed()
-    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, nw_goal_increment=nw_increment, show_email_setup=show_email_setup)
+    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, nw_goal_increment=nw_increment, show_email_setup=show_email_setup, has_activity=has_activity)
 
 
 @app.route('/analytics')
@@ -570,10 +583,12 @@ def analytics():
     return render_template('analytics.html', summary=summary)
 
 
+ACCOUNT_TYPE_ORDER = {'savings': 0, 'credit': 1, 'investment': 2}
+
 @app.route('/accounts')
 @login_required
 def accounts_page():
-    accounts = load_accounts()
+    accounts = sorted(load_accounts(), key=lambda a: (ACCOUNT_TYPE_ORDER.get(a.get('type'), 99), a.get('name', '').lower()))
     balances = compute_account_balances()
     return render_template('accounts.html', accounts=accounts, balances=balances)
 
@@ -646,6 +661,9 @@ def api_add_transaction():
         return jsonify({'success': False, 'error': 'Valid amount is required'}), 400
     if amount <= 0:
         return jsonify({'success': False, 'error': 'Amount must be positive'}), 400
+    transfer_to_account = data.get('transfer_to_account') or None
+    if transfer_to_account and transfer_to_account == data.get('account'):
+        return jsonify({'success': False, 'error': 'Transfer destination must differ from the source account'}), 400
     try:
         units = float(data['units']) if data.get('units') else None
         txn_id = add_transaction(
@@ -660,6 +678,7 @@ def api_add_transaction():
             track=data.get('track', True),
             units=units,
             plan_bucket=data.get('plan_bucket') or None,
+            transfer_to_account=transfer_to_account if txn_type == 'Transfer' else None,
         )
         app.logger.info("Transaction created: id=%s desc='%s' amount=%.2f account='%s' type=%s", txn_id, data['description'], float(data['amount']), data['account'], txn_type)
         return jsonify({'success': True, 'id': txn_id})
@@ -704,6 +723,8 @@ def api_update_transaction(txn_id):
                 return jsonify({'success': False, 'error': 'Amount must be positive'}), 400
         except (TypeError, ValueError):
             return jsonify({'success': False, 'error': 'Valid amount is required'}), 400
+    if data.get('transfer_to_account') and data.get('transfer_to_account') == data.get('account'):
+        return jsonify({'success': False, 'error': 'Transfer destination must differ from the source account'}), 400
     try:
         updated = update_transaction(txn_id, data)
         app.logger.info("Transaction updated: id=%s", txn_id)
@@ -1182,7 +1203,7 @@ def api_export_csv():
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Date', 'ID', 'Description', 'Category', 'Sub-Category', 'Account', 'Amount', 'Type', 'Track', 'Units', 'Parent ID'])
+    writer.writerow(['Date', 'ID', 'Description', 'Category', 'Sub-Category', 'Account', 'Transfer To', 'Amount', 'Type', 'Track', 'Units', 'Parent ID'])
     def strip_sanitize_prefix(s):
         """Remove the single-quote prefix added by sanitize_cell for CSV export, keeping formula injection protection."""
         if isinstance(s, str) and s.startswith("'") and len(s) > 1 and s[1] in ('=', '+', '-', '@', '|', '\t'):
@@ -1195,7 +1216,7 @@ def api_export_csv():
             t['date'], t['id'], strip_sanitize_prefix(t['description']),
             strip_sanitize_prefix(t['category']),
             strip_sanitize_prefix(t.get('sub_category', '')),
-            strip_sanitize_prefix(t['account']), t['amount'],
+            strip_sanitize_prefix(t['account']), strip_sanitize_prefix(t.get('transfer_to_account', '') or ''), t['amount'],
             t['type'], 'Yes' if t.get('track', True) else 'No',
             t.get('units', ''), t.get('parent_id', '')
         ])

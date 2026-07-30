@@ -237,6 +237,74 @@ if ('serviceWorker' in navigator) {
 }
 
 
+// ── 8. Help icons (small "?" tooltips explaining pages/buttons/workflows) ──
+// Usage: <span class="help-icon" tabindex="0" role="button" aria-label="Help"
+//         data-help="Explanation text goes here">?</span>
+// Self-initializing via event delegation — works for icons added dynamically
+// later (e.g. rows built via innerHTML), no per-page init call needed.
+(function() {
+  const style = document.createElement('style');
+  style.textContent = `
+    .help-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; border-radius: 50%;
+      background: var(--surface2); color: var(--muted); border: 1px solid var(--border);
+      font-size: 0.62rem; font-weight: 700; cursor: help; user-select: none;
+      position: relative; flex-shrink: 0; margin-left: 5px; vertical-align: middle;
+      line-height: 1;
+    }
+    .help-icon:hover, .help-icon:focus { color: var(--accent); border-color: var(--accent); outline: none; }
+    .help-popover {
+      position: absolute; z-index: 10000; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+      background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px; font-size: 0.75rem; line-height: 1.45;
+      width: max-content; max-width: 240px; text-align: left; cursor: auto;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25); white-space: normal;
+    }
+    .help-popover::after {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      border: 5px solid transparent; border-top-color: var(--border);
+    }
+    @media (max-width: 480px) {
+      .help-popover { left: 0; transform: none; max-width: 200px; }
+      .help-popover::after { left: 12px; transform: none; }
+    }
+  `;
+  document.head.appendChild(style);
+
+  document.addEventListener('click', function(e) {
+    const icon = e.target.closest('.help-icon');
+    // help-icon is often placed inside a <label for="...">; without this, the
+    // browser's native label-click forwards a second synthetic click to the
+    // associated form control, which bubbles back to this same listener and
+    // immediately closes the popover this click just opened.
+    if (icon) e.preventDefault();
+    const openPopover = document.querySelector('.help-popover');
+    const wasThisIconOpen = !!(openPopover && icon && openPopover.parentElement === icon);
+    if (openPopover) openPopover.remove();
+    if (icon && icon.dataset.help && !wasThisIconOpen) {
+      e.stopPropagation();
+      const pop = document.createElement('div');
+      pop.className = 'help-popover';
+      pop.textContent = icon.dataset.help;
+      icon.appendChild(pop);
+    }
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      if (document.activeElement && document.activeElement.classList.contains('help-icon')) {
+        e.preventDefault();
+        document.activeElement.click();
+      }
+    } else if (e.key === 'Escape') {
+      const p = document.querySelector('.help-popover');
+      if (p) p.remove();
+    }
+  });
+})();
+
+
 // ── 7. Relative timestamps ──
 function timeAgo(dateStr) {
   // Compare calendar dates to avoid timezone/time-of-day issues

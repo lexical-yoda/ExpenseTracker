@@ -122,17 +122,22 @@ def this_month_target(plan, as_of_date=None):
 
 
 def _plan_transactions(transactions, plan):
-    """Income, parent-only transactions tagged with a known bucket id, on/after plan_start_date."""
+    """Income or Transfer-with-destination, parent-only transactions tagged with
+    a known bucket id, on/after plan_start_date. Transfer counts here too since
+    a one-step transfer (source account -> destination account, single row) is
+    the normal way to fund a bucket-linked account without a separate Income leg."""
     if 'plan_start_date' not in plan:
         return []
     start = _parse_date(plan['plan_start_date'])
     bucket_ids = {b['id'] for b in plan.get('buckets', [])}
     out = []
     for t in transactions:
-        if t.get('type') != 'Income' or t.get('parent_id') or not t.get('plan_bucket'):
+        if t.get('type') not in ('Income', 'Transfer') or t.get('parent_id') or not t.get('plan_bucket'):
             continue
         if t['plan_bucket'] not in bucket_ids:
             continue
+        if t['type'] == 'Transfer' and not t.get('transfer_to_account'):
+            continue  # no destination credited — nothing actually funded the bucket
         try:
             t_date = _parse_date(t['date'])
         except (ValueError, TypeError):

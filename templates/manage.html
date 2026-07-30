@@ -799,10 +799,22 @@
         </div>
 
         <div class="form-group">
-          <label for="account">Account</label>
+          <label for="account" id="account-label">Account</label>
           <select id="account" required>
             <option value="" disabled selected>Select account</option>
             {% for acct in accounts %}
+            <option value="{{ acct.name }}">{{ acct.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group" id="transfer-to-group" style="display:none">
+          <label for="transfer_to_account">To Account
+            <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Money moves out of Account above and into this one in a single entry — no need to log a separate Income transaction on the destination.">?</span>
+          </label>
+          <select id="transfer_to_account">
+            <option value="" disabled selected>Select destination account</option>
+            {% for acct in accounts if acct.type in ('savings', 'credit') %}
             <option value="{{ acct.name }}">{{ acct.name }}</option>
             {% endfor %}
           </select>
@@ -961,6 +973,7 @@
             <div class="txn-meta">
               <span class="txn-cat">{{ txn.category }}</span>
               {% if txn.sub_category %}<span>{{ txn.sub_category }}</span>{% endif %}
+              {% if txn.type == 'Transfer' and txn.transfer_to_account %}<span>→ {{ txn.transfer_to_account }}</span>{% endif %}
             </div>
           </div>
           <div class="txn-right">
@@ -1056,10 +1069,20 @@
     </div>
 
     <div class="form-group">
-      <label for="edit-account">Account</label>
+      <label for="edit-account" id="edit-account-label">Account</label>
       <select id="edit-account" required>
         <option value="" disabled>Select account</option>
         {% for acct in accounts %}
+        <option value="{{ acct.name }}">{{ acct.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group" id="edit-transfer-to-group" style="display:none">
+      <label for="edit-transfer-to-account">To Account</label>
+      <select id="edit-transfer-to-account">
+        <option value="" disabled>Select destination account</option>
+        {% for acct in accounts if acct.type in ('savings', 'credit') %}
         <option value="{{ acct.name }}">{{ acct.name }}</option>
         {% endfor %}
       </select>
@@ -1202,6 +1225,25 @@
     return acctId != null && bucketByAccountId[acctId] !== undefined ? bucketByAccountId[acctId] : '';
   }
 
+  function currentTxnType() {
+    const checked = document.querySelector('input[name="txn_type"]:checked');
+    return checked ? checked.value : 'Expense';
+  }
+
+  // The bucket-matching account is the destination for a Transfer, the account
+  // itself for Income — Expense never shows the bucket field at all.
+  function bucketMatchAccount() {
+    const type = currentTxnType();
+    if (type === 'Transfer') return document.getElementById('transfer_to_account').value;
+    if (type === 'Income') return acctSelect.value;
+    return '';
+  }
+
+  function refreshBucketSelection() {
+    const bucketSelect = document.getElementById('plan_bucket');
+    if (bucketSelect) bucketSelect.value = matchPlanBucket(bucketMatchAccount());
+  }
+
   // Show/hide units field based on selected account type
   const acctSelect = document.getElementById('account');
   if (acctSelect) {
@@ -1213,23 +1255,34 @@
         unitsGroup.style.display = 'none';
         document.getElementById('units').value = '';
       }
-      const bucketSelect = document.getElementById('plan_bucket');
-      if (bucketSelect) bucketSelect.value = matchPlanBucket(this.value);
+      refreshBucketSelection();
     });
   }
 
-  // Show/hide plan bucket field based on selected transaction type (Income only)
+  const transferToSelect = document.getElementById('transfer_to_account');
+  if (transferToSelect) {
+    transferToSelect.addEventListener('change', refreshBucketSelection);
+  }
+
+  // Show/hide "To Account" + Plan Bucket fields based on selected transaction type
   document.querySelectorAll('input[name="txn_type"]').forEach(radio => {
     radio.addEventListener('change', function() {
+      if (!this.checked) return;
+      const type = this.value;
+      const transferGroup = document.getElementById('transfer-to-group');
+      const accountLabel = document.getElementById('account-label');
       const bucketGroup = document.getElementById('plan-bucket-group');
-      if (!bucketGroup) return;
-      if (this.checked && this.value === 'Income') {
-        bucketGroup.style.display = 'block';
-        const bucketSelect = document.getElementById('plan_bucket');
-        if (bucketSelect && acctSelect) bucketSelect.value = matchPlanBucket(acctSelect.value);
-      } else if (this.checked) {
-        bucketGroup.style.display = 'none';
+
+      if (transferGroup) transferGroup.style.display = type === 'Transfer' ? 'block' : 'none';
+      if (accountLabel) accountLabel.textContent = type === 'Transfer' ? 'From Account' : 'Account';
+      if (!transferGroup || type !== 'Transfer') {
+        // reset destination when switching away from Transfer
+        if (transferToSelect) transferToSelect.value = '';
       }
+      if (bucketGroup) {
+        bucketGroup.style.display = (type === 'Income' || type === 'Transfer') ? 'block' : 'none';
+      }
+      refreshBucketSelection();
     });
   });
 
@@ -1357,6 +1410,13 @@
     const unitsEl = document.getElementById('units');
     const unitsVal = unitsEl && unitsEl.value ? parseFloat(unitsEl.value) : null;
     const bucketEl = document.getElementById('plan_bucket');
+    const txnTypeVal = document.querySelector('input[name="txn_type"]:checked').value;
+    if (txnTypeVal === 'Transfer' && !document.getElementById('transfer_to_account').value) {
+      showToast('Select a destination account for this transfer', 'error');
+      btn.disabled = false;
+      btn.textContent = '{% if parent %}Add Sub-expense{% else %}Save Expense{% endif %}';
+      return;
+    }
     const payload = {
       date: document.getElementById('date').value,
       description: document.getElementById('description').value,
@@ -1365,9 +1425,10 @@
       category: document.getElementById('category').value,
       sub_category: document.getElementById('sub_category').value,
       parent_id: parentIdEl ? parseInt(parentIdEl.value) : null,
-      type: document.querySelector('input[name="txn_type"]:checked').value,
+      type: txnTypeVal,
       units: unitsVal,
       plan_bucket: bucketEl ? (bucketEl.value || null) : null,
+      transfer_to_account: txnTypeVal === 'Transfer' ? document.getElementById('transfer_to_account').value : null,
     };
 
     try {
@@ -1418,6 +1479,7 @@
                   <div class="txn-meta">
                     <span class="txn-cat">${esc(payload.category)}</span>
                     ${payload.sub_category ? '<span>' + esc(payload.sub_category) + '</span>' : ''}
+                    ${payload.type === 'Transfer' && payload.transfer_to_account ? '<span>→ ' + esc(payload.transfer_to_account) + '</span>' : ''}
                   </div>
                 </div>
                 <div class="txn-right">
@@ -1694,11 +1756,27 @@
       document.getElementById('edit-units').value = '';
     }
 
-    // Show plan bucket field if Income
+    // Show "To Account" field if Transfer
+    const editTransferGroup = document.getElementById('edit-transfer-to-group');
+    const editTransferSelect = document.getElementById('edit-transfer-to-account');
+    const editAccountLabel = document.getElementById('edit-account-label');
+    if (editTransferGroup) {
+      if (txn.type === 'Transfer') {
+        editTransferGroup.style.display = 'block';
+        editTransferSelect.value = txn.transfer_to_account || '';
+        editAccountLabel.textContent = 'From Account';
+      } else {
+        editTransferGroup.style.display = 'none';
+        editTransferSelect.value = '';
+        editAccountLabel.textContent = 'Account';
+      }
+    }
+
+    // Show plan bucket field if Income or Transfer
     const editBucketGroup = document.getElementById('edit-plan-bucket-group');
     const editBucketSelect = document.getElementById('edit-plan-bucket');
     if (editBucketGroup) {
-      if (txn.type === 'Income') {
+      if (txn.type === 'Income' || txn.type === 'Transfer') {
         editBucketGroup.style.display = 'block';
         editBucketSelect.value = txn.plan_bucket || '';
       } else {
@@ -1715,6 +1793,18 @@
     if (e.target === this) this.classList.remove('open');
   });
 
+  function editBucketMatchAccount() {
+    const type = document.querySelector('input[name="edit-type"]:checked').value;
+    if (type === 'Transfer') return document.getElementById('edit-transfer-to-account').value;
+    if (type === 'Income') return document.getElementById('edit-account').value;
+    return '';
+  }
+
+  function refreshEditBucketSelection() {
+    const editBucketSelect = document.getElementById('edit-plan-bucket');
+    if (editBucketSelect) editBucketSelect.value = matchPlanBucket(editBucketMatchAccount());
+  }
+
   document.getElementById('edit-account').addEventListener('change', function() {
     const editUnitsGroup = document.getElementById('edit-units-group');
     if (accountTypes[this.value] === 'investment') {
@@ -1723,15 +1813,29 @@
       editUnitsGroup.style.display = 'none';
       document.getElementById('edit-units').value = '';
     }
-    const editBucketSelect = document.getElementById('edit-plan-bucket');
-    if (editBucketSelect) editBucketSelect.value = matchPlanBucket(this.value);
+    refreshEditBucketSelection();
   });
+
+  const editTransferToSelect = document.getElementById('edit-transfer-to-account');
+  if (editTransferToSelect) {
+    editTransferToSelect.addEventListener('change', refreshEditBucketSelection);
+  }
 
   document.querySelectorAll('input[name="edit-type"]').forEach(radio => {
     radio.addEventListener('change', function() {
+      if (!this.checked) return;
+      const type = this.value;
+      const editTransferGroup = document.getElementById('edit-transfer-to-group');
+      const editAccountLabel = document.getElementById('edit-account-label');
       const editBucketGroup = document.getElementById('edit-plan-bucket-group');
-      if (!editBucketGroup) return;
-      editBucketGroup.style.display = (this.checked && this.value === 'Income') ? 'block' : 'none';
+
+      if (editTransferGroup) editTransferGroup.style.display = type === 'Transfer' ? 'block' : 'none';
+      if (editAccountLabel) editAccountLabel.textContent = type === 'Transfer' ? 'From Account' : 'Account';
+      if (type !== 'Transfer' && editTransferToSelect) editTransferToSelect.value = '';
+      if (editBucketGroup) {
+        editBucketGroup.style.display = (type === 'Income' || type === 'Transfer') ? 'block' : 'none';
+      }
+      refreshEditBucketSelection();
     });
   });
 
@@ -1744,6 +1848,13 @@
     const editUnitsEl = document.getElementById('edit-units');
     const editUnitsVal = editUnitsEl && editUnitsEl.value ? parseFloat(editUnitsEl.value) : null;
     const editBucketEl = document.getElementById('edit-plan-bucket');
+    const editTypeVal = document.querySelector('input[name="edit-type"]:checked').value;
+    if (editTypeVal === 'Transfer' && !document.getElementById('edit-transfer-to-account').value) {
+      showToast('Select a destination account for this transfer', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+      return;
+    }
     const payload = {
       date: document.getElementById('edit-date').value,
       description: document.getElementById('edit-desc').value,
@@ -1751,9 +1862,10 @@
       amount: document.getElementById('edit-amount').value,
       category: document.getElementById('edit-category').value,
       sub_category: document.getElementById('edit-subcategory').value,
-      type: document.querySelector('input[name="edit-type"]:checked').value,
+      type: editTypeVal,
       units: editUnitsVal,
       plan_bucket: editBucketEl ? (editBucketEl.value || null) : null,
+      transfer_to_account: editTypeVal === 'Transfer' ? document.getElementById('edit-transfer-to-account').value : null,
     };
 
     try {
