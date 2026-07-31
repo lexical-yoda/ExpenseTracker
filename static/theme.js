@@ -1,8 +1,7 @@
 /**
  * Theme manager for Expense Manager.
- * Single palette (Fold's design tokens, id "github" for historical/storage
- * compatibility) with a dark/light mode toggle — no palette picker anymore.
- * Stores mode preference in localStorage.
+ * Single palette (GitHub-inspired, id "github") with a dark/light mode
+ * toggle — no palette picker anymore. Stores mode preference in localStorage.
  */
 
 // SW registration handled by interactions.js

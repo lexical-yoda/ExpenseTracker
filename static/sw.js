@@ -1,4 +1,4 @@
-const CACHE_VERSION = 6;
+const CACHE_VERSION = 7;
 const CACHE_NAME = 'em-v' + CACHE_VERSION;
 const PRECACHE = [
   '/static/themes.css',

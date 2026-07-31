@@ -1979,8 +1979,8 @@ def pwa_manifest():
         'description': 'Personal expense tracker with multi-account support',
         'start_url': '/',
         'display': 'standalone',
-        'background_color': '#1f1f1f',
-        'theme_color': '#1f1f1f',
+        'background_color': '#0d1117',
+        'theme_color': '#0d1117',
         'orientation': 'portrait',
         'icons': [
             {'src': '/static/icon-192.png', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any maskable'},

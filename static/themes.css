@@ -252,23 +252,19 @@ input[type="checkbox"]:focus-visible + label {
    values are already correct for both.
    ══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── Fold ── (default theme; palette id stays "github" for existing
-   localStorage/data-theme compatibility, only the picker label and the
-   actual colors changed) — lifted from fold.money's decompiled design
-   tokens (values/colors.xml + values-night/colors.xml): comet/madison for
-   light neutrals+accent, n/a scales for dark neutrals+accent, roja/forest
-   for danger/success. --bucket-* categorical set is intentionally left
-   untouched (see note below) — validated across every theme on purpose. */
+/* ── GitHub ── (default and only theme; Fold's decompiled palette was tried
+   here and reverted — didn't read well in practice, back to the original
+   GitHub-inspired colors.) */
 [data-theme="github-dark"] {
-  --bg: #1f1f1f; --surface: #303030; --surface2: #4a4a4a; --border: #803f80eb;
-  --accent: #5c99ff; --accent-dim: #3f80eb; --text: #f5f5f5; --muted: #a1a1a1;
-  --danger: #fa9292; --success: #8df099; --savings: #5c99ff; --cc: #b53535;
+  --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
+  --accent: #58a6ff; --accent-dim: #388bfd; --text: #c9d1d9; --muted: #8b949e;
+  --danger: #f85149; --success: #3fb950; --savings: #58a6ff; --cc: #d29922;
   --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="github-light"] {
-  --bg: #ffffff; --surface: #f0f1f5; --surface2: #c7cbdb; --border: #80afbede;
-  --accent: #0a2d67; --accent-dim: #0e2853; --text: #20294c; --muted: #676b89;
-  --danger: #f35959; --success: #136317; --savings: #0a2d67; --cc: #ef2929;
+  --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2; --border: #d0d7de;
+  --accent: #0969da; --accent-dim: #0550ae; --text: #1f2328; --muted: #656d76;
+  --danger: #cf222e; --success: #1a7f37; --savings: #0969da; --cc: #9a6700;
   --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
