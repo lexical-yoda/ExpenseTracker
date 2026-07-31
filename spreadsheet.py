@@ -10,12 +10,14 @@ from collections import defaultdict
 # File lock for xlsx read-modify-write operations
 _xlsx_lock = threading.Lock()
 _accounts_lock = threading.Lock()
+_balance_history_lock = threading.Lock()
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 XLSX_PATH = os.environ.get('EXPENSES_XLSX', os.path.join(DATA_DIR, 'expenses.xlsx'))
 ACCOUNTS_FILE = os.path.join(DATA_DIR, 'accounts.json')
+BALANCE_HISTORY_FILE = os.path.join(DATA_DIR, 'account_balance_history.json')
 
 COLUMNS = {
     'date': 1,          # A
@@ -494,6 +496,46 @@ def rename_account_in_sheets(old_name, new_name):
             save_workbook(wb)
 
 
+def _snapshot_account_balances(result):
+    """Append today's computed balance per account to a lightweight history
+    file, for dashboard sparklines. Idempotent per day — repeated calls the
+    same day update today's entry in place instead of duplicating. Purely
+    additive/new file — never touches accounts.json's own shape."""
+    today = date.today().isoformat()
+    with _balance_history_lock:
+        history = {}
+        if os.path.exists(BALANCE_HISTORY_FILE):
+            try:
+                with open(BALANCE_HISTORY_FILE, 'r') as f:
+                    history = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                history = {}
+        changed = False
+        for acct in result:
+            if acct['type'] == 'savings':
+                value = acct.get('current_balance', 0)
+            elif acct['type'] == 'credit':
+                value = acct.get('accumulated', 0)
+            elif acct['type'] == 'investment':
+                value = acct.get('invested', 0)
+            else:
+                continue
+            acct_id = str(acct['id'])
+            series = history.setdefault(acct_id, [])
+            if series and series[-1]['date'] == today:
+                if series[-1]['balance'] != value:
+                    series[-1]['balance'] = value
+                    changed = True
+            else:
+                series.append({'date': today, 'balance': value})
+                changed = True
+                if len(series) > 400:  # keep the file small — ~13 months of daily snapshots
+                    del series[:len(series) - 400]
+        if changed:
+            with open(BALANCE_HISTORY_FILE, 'w') as f:
+                json.dump(history, f)
+
+
 def compute_account_balances():
     """Compute current balance for each account from accounts.json + transactions."""
     with _accounts_lock:
@@ -540,7 +582,21 @@ def compute_account_balances():
             entry = {**acct, 'invested': acct.get('balance', 0)}
             entry['subtype'] = acct.get('subtype', 'market')
             result.append(entry)
+    _snapshot_account_balances(result)
     return result
+
+
+def get_account_balance_history():
+    """Return the raw {account_id: [{date, balance}, ...]} history file, or
+    {} if it doesn't exist yet (e.g. freshly upgraded install — sparklines
+    just show 'not enough history yet' until it accumulates)."""
+    if not os.path.exists(BALANCE_HISTORY_FILE):
+        return {}
+    try:
+        with open(BALANCE_HISTORY_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 # ── Summary for dashboard ──────────────────────────────────────────────────────

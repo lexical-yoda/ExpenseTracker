@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#0d1117">
+  <meta name="theme-color" content="#1f1f1f">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>Manage — Expense Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -911,8 +911,8 @@
   {% if not parents %}
   <div class="empty">
     <div class="empty-icon">📭</div>
-    <div class="empty-title">No transactions yet</div>
-    <div>Use the form above to add your first transaction</div>
+    <div class="empty-title">Nothing logged yet</div>
+    <div>Your ledger's empty — add your first transaction above, or paste a bank email to get going</div>
   </div>
   {% else %}
 
@@ -921,6 +921,11 @@
     {% set _ = account_types.update({acct.name: acct.type}) %}
   {% endfor %}
 
+  <div class="empty" id="no-search-results" style="display:none;">
+    <div class="empty-icon">🔍</div>
+    <div class="empty-title">No matches</div>
+    <div>Nothing fits those filters — try loosening the search or date range</div>
+  </div>
   <div id="txn-list">
     {% set ns = namespace(cur_month='', cur_day='') %}
     {% for txn in parents %}
@@ -1541,14 +1546,15 @@
     let visible = 0;
 
     cards.forEach(card => {
-      const desc = (card.dataset.desc || '').toLowerCase();
       const cat = card.dataset.cat || '';
       const account = card.dataset.account || '';
       const type = card.dataset.type || '';
       const txnDate = card.dataset.date || '';
 
       let match = true;
-      if (q && !desc.includes(q) && !cat.toLowerCase().includes(q)) match = false;
+      // Shared with the Cmd+K global search overlay (interactions.js) — same
+      // predicate both places, so the two can never disagree on what "matches".
+      if (!matchesSearchQuery(card.dataset.desc, cat, q)) match = false;
       if (fAccount && account !== fAccount) match = false;
       if (fType && type !== fType) match = false;
       if (fCategory && cat !== fCategory) match = false;
@@ -1580,6 +1586,12 @@
     });
 
     document.getElementById('txn-count').textContent = visible + ' transactions';
+
+    const noResultsEl = document.getElementById('no-search-results');
+    if (noResultsEl) {
+      const anyFilterActive = !!(q || fAccount || fType || fCategory || fFrom || fTo);
+      noResultsEl.style.display = (visible === 0 && anyFilterActive && cards.length > 0) ? '' : 'none';
+    }
   }
 
   document.getElementById('search')?.addEventListener('input', applyFilters);
@@ -1589,10 +1601,12 @@
   document.getElementById('filter-from')?.addEventListener('change', applyFilters);
   document.getElementById('filter-to')?.addEventListener('change', applyFilters);
 
-  // Auto-filter from URL params (e.g., ?date=2026-03-05 from dashboard chart click)
+  // Auto-filter from URL params (e.g., ?date=2026-03-05 from dashboard chart click,
+  // or ?search=swiggy from the Cmd+K global search overlay in interactions.js)
   (function() {
     const urlParams = new URLSearchParams(window.location.search);
     const dateParam = urlParams.get('date');
+    const searchParam = urlParams.get('search');
     if (dateParam) {
       const fromEl = document.getElementById('filter-from');
       const toEl = document.getElementById('filter-to');
@@ -1604,6 +1618,15 @@
         if (filterSection) filterSection.style.display = 'flex';
         applyFilters();
         // Scroll to transaction list
+        const txnList = document.getElementById('txn-list');
+        if (txnList) setTimeout(() => txnList.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+      }
+    }
+    if (searchParam) {
+      const searchEl = document.getElementById('search');
+      if (searchEl) {
+        searchEl.value = searchParam;
+        applyFilters();
         const txnList = document.getElementById('txn-list');
         if (txnList) setTimeout(() => txnList.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
       }
@@ -2274,7 +2297,7 @@
         document.getElementById('draft-section').classList.add('open');
         loadDrafts();
       } else {
-        errEl.textContent = data.error || 'Parse failed';
+        errEl.textContent = data.error || "Couldn't parse that one — give it another try.";
         errEl.style.display = 'block';
       }
     } catch (e) {

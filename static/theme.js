@@ -1,26 +1,22 @@
 /**
  * Theme manager for Expense Manager.
- * Handles palette selection (github, indigo, nord, etc.) and mode (dark/light).
- * Stores preference in localStorage.
+ * Single palette (Fold's design tokens, id "github" for historical/storage
+ * compatibility) with a dark/light mode toggle — no palette picker anymore.
+ * Stores mode preference in localStorage.
  */
 
 // SW registration handled by interactions.js
 
-const THEMES = [
-  { id: 'github',  label: 'GitHub' },
-  { id: 'indigo',  label: 'Indigo' },
-  { id: 'nord',    label: 'Nord' },
-  { id: 'emerald', label: 'Emerald' },
-  { id: 'rose',    label: 'Rose' },
-  { id: 'amber',   label: 'Amber' },
-  { id: 'ocean',   label: 'Ocean' },
-];
-
-const LS_PALETTE = 'em-palette';
+const FIXED_PALETTE = 'github';
 const LS_MODE = 'em-mode';
 
 function getSavedPalette() {
-  return localStorage.getItem(LS_PALETTE) || 'github';
+  // Always the one remaining palette, regardless of any stale 'em-palette'
+  // value a returning browser might still have from before the picker was
+  // removed — reading that old value here would set data-theme to an id with
+  // no matching CSS block anymore (e.g. "nord-dark"), leaving every --bg/
+  // --text/etc. var undefined and the whole app unstyled.
+  return FIXED_PALETTE;
 }
 
 function getSavedMode() {
@@ -55,19 +51,11 @@ function initThemePicker(onThemeChange) {
   }
   updateIcon();
 
-  // Create the palette picker dropdown
+  // Create the mode picker dropdown \u2014 just dark/light now, no palette choice.
   const picker = document.createElement('div');
   picker.className = 'theme-picker';
   picker.id = 'theme-picker';
   picker.innerHTML = `
-    <div class="theme-picker-title">Theme</div>
-    ${THEMES.map(t => `
-      <button class="theme-picker-item ${t.id === palette ? 'active' : ''}" data-palette="${t.id}">
-        <span class="theme-picker-dot"></span>
-        ${t.label}
-      </button>
-    `).join('')}
-    <div class="theme-picker-divider"></div>
     <div class="theme-picker-title">Mode</div>
     <div class="theme-picker-modes">
       <button class="theme-picker-mode ${mode === 'dark' ? 'active' : ''}" data-mode="dark">\u263E Dark</button>
@@ -97,20 +85,8 @@ function initThemePicker(onThemeChange) {
     }
   });
 
-  // Palette selection
   picker.addEventListener('click', function(e) {
-    const item = e.target.closest('.theme-picker-item');
     const modeBtn = e.target.closest('.theme-picker-mode');
-
-    if (item) {
-      palette = item.dataset.palette;
-      localStorage.setItem(LS_PALETTE, palette);
-      applyTheme(palette, mode);
-      // Update active states
-      picker.querySelectorAll('.theme-picker-item').forEach(el => el.classList.remove('active'));
-      item.classList.add('active');
-      if (onThemeChange) onThemeChange();
-    }
 
     if (modeBtn) {
       mode = modeBtn.dataset.mode;

@@ -5,6 +5,70 @@
   --font-mono: 'DM Mono', monospace;
 }
 
+/* ── Semantic design tokens ──
+   Alias layer over the existing per-theme raw vars (--bg, --text, --accent, etc.)
+   so future components reference a role ("fgMuted", "bgInset") instead of a raw
+   name, and stay correct across all 7 palettes automatically. Each alias just
+   points at whatever the existing var already resolves to for the active theme —
+   zero visual change on introduction. Existing raw var names are untouched;
+   nothing below renames or replaces them. New components should prefer these;
+   existing CSS does not need to be migrated to use them. */
+:root {
+  /* Foreground (text/icon) */
+  --fg-default: var(--text);
+  --fg-muted: var(--muted);
+  --fg-subtle: var(--muted);
+  --fg-danger: var(--danger);
+  --fg-success: var(--success);
+
+  /* Background / surface */
+  --bg-default: var(--bg);
+  --bg-surface: var(--surface);
+  --bg-inset: var(--surface2);
+
+  /* Border */
+  --border-default: var(--border);
+  --border-muted: var(--border);
+
+  /* Action (buttons) — existing primary buttons hardcode #fff text on
+     var(--accent) background across every template; this just names that
+     existing convention rather than changing it. */
+  --action-primary-bg: var(--accent);
+  --action-primary-fg: #ffffff;
+  --action-secondary-bg: var(--surface2);
+  --action-secondary-fg: var(--accent);
+
+  /* Input */
+  --input-default-bg: var(--surface);
+  --input-default-border: var(--border);
+  --input-default-fg: var(--text);
+}
+
+/* ── Type scale ──
+   Named utility classes for this app's own two-font identity (Syne for
+   headings, DM Mono for body/label) — not a copy of any external app's font
+   choices, just the same "named scale instead of ad-hoc font-size per
+   component" discipline. Sizes match what templates already use in practice
+   (.page-title is 1.6rem, .stat-value is 1.2rem, .chart-title is 0.95rem,
+   .stat-label is 0.6rem, etc.) so adopting a class changes nothing visually
+   where it lines up with an existing component — these are additive only;
+   no existing font-size declaration in any template is changed by adding
+   this block. Use on new components going forward; existing CSS does not
+   need to be migrated. */
+.text-heading-xl { font-family: var(--font-display); font-weight: 700; font-size: 2rem; line-height: 1.15; }
+.text-heading-lg { font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; line-height: 1.2; }
+.text-heading-md { font-family: var(--font-display); font-weight: 700; font-size: 1.2rem; line-height: 1.25; }
+.text-heading-sm { font-family: var(--font-display); font-weight: 600; font-size: 0.95rem; line-height: 1.3; }
+.text-heading-xs { font-family: var(--font-display); font-weight: 600; font-size: 0.85rem; line-height: 1.3; }
+
+.text-body-lg { font-family: var(--font-mono); font-weight: 400; font-size: 0.9rem; line-height: 1.5; }
+.text-body-md { font-family: var(--font-mono); font-weight: 400; font-size: 0.8rem; line-height: 1.5; }
+.text-body-sm { font-family: var(--font-mono); font-weight: 400; font-size: 0.75rem; line-height: 1.45; }
+
+.text-label-md { font-family: var(--font-mono); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.3; }
+.text-label-sm { font-family: var(--font-mono); font-weight: 500; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.8px; line-height: 1.3; }
+.text-label-xs { font-family: var(--font-mono); font-weight: 500; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.8px; line-height: 1.3; }
+
 /* ── Theme picker dropdown ── */
 .theme-picker {
   display: none;
@@ -28,45 +92,6 @@
   letter-spacing: 0.8px;
   color: var(--muted);
   padding: 4px 8px 6px;
-}
-.theme-picker-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: none;
-  border: none;
-  border-radius: 4px;
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  padding: 6px 8px;
-  cursor: pointer;
-  transition: background 0.1s;
-  text-align: left;
-}
-.theme-picker-item:hover { background: var(--surface2); }
-.theme-picker-item.active { color: var(--accent); }
-
-.theme-picker-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-/* Per-palette accent colors for the dots (always visible regardless of current theme) */
-.theme-picker-item[data-palette="github"] .theme-picker-dot { background: #58a6ff; }
-.theme-picker-item[data-palette="indigo"] .theme-picker-dot { background: #818cf8; }
-.theme-picker-item[data-palette="nord"] .theme-picker-dot { background: #88c0d0; }
-.theme-picker-item[data-palette="emerald"] .theme-picker-dot { background: #34d399; }
-.theme-picker-item[data-palette="rose"] .theme-picker-dot { background: #f472b6; }
-.theme-picker-item[data-palette="amber"] .theme-picker-dot { background: #f59e0b; }
-.theme-picker-item[data-palette="ocean"] .theme-picker-dot { background: #38bdf8; }
-
-.theme-picker-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 6px 0;
 }
 .theme-picker-modes {
   display: grid;
@@ -227,100 +252,23 @@ input[type="checkbox"]:focus-visible + label {
    values are already correct for both.
    ══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── GitHub ── */
+/* ── Fold ── (default theme; palette id stays "github" for existing
+   localStorage/data-theme compatibility, only the picker label and the
+   actual colors changed) — lifted from fold.money's decompiled design
+   tokens (values/colors.xml + values-night/colors.xml): comet/madison for
+   light neutrals+accent, n/a scales for dark neutrals+accent, roja/forest
+   for danger/success. --bucket-* categorical set is intentionally left
+   untouched (see note below) — validated across every theme on purpose. */
 [data-theme="github-dark"] {
-  --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
-  --accent: #58a6ff; --accent-dim: #388bfd; --text: #c9d1d9; --muted: #8b949e;
-  --danger: #f85149; --success: #3fb950; --savings: #58a6ff; --cc: #d29922;
+  --bg: #1f1f1f; --surface: #303030; --surface2: #4a4a4a; --border: #803f80eb;
+  --accent: #5c99ff; --accent-dim: #3f80eb; --text: #f5f5f5; --muted: #a1a1a1;
+  --danger: #fa9292; --success: #8df099; --savings: #5c99ff; --cc: #b53535;
   --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="github-light"] {
-  --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2; --border: #d0d7de;
-  --accent: #0969da; --accent-dim: #0550ae; --text: #1f2328; --muted: #656d76;
-  --danger: #cf222e; --success: #1a7f37; --savings: #0969da; --cc: #9a6700;
+  --bg: #ffffff; --surface: #f0f1f5; --surface2: #c7cbdb; --border: #80afbede;
+  --accent: #0a2d67; --accent-dim: #0e2853; --text: #20294c; --muted: #676b89;
+  --danger: #f35959; --success: #136317; --savings: #0a2d67; --cc: #ef2929;
   --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
-/* ── Indigo & Slate ── */
-[data-theme="indigo-dark"] {
-  --bg: #0f0f1a; --surface: #1a1a2e; --surface2: #25253d; --border: #333358;
-  --accent: #818cf8; --accent-dim: #6366f1; --text: #e8e8f0; --muted: #8484a8;
-  --danger: #f87171; --success: #4ade80; --savings: #60a5fa; --cc: #fb923c;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-[data-theme="indigo-light"] {
-  --bg: #f5f5f7; --surface: #ffffff; --surface2: #ebebf0; --border: #d1d1db;
-  --accent: #4f46e5; --accent-dim: #4338ca; --text: #1e1e2e; --muted: #6b6b8a;
-  --danger: #dc2626; --success: #16a34a; --savings: #2563eb; --cc: #ea580c;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-
-/* ── Nord Aurora ── */
-[data-theme="nord-dark"] {
-  --bg: #2e3440; --surface: #3b4252; --surface2: #434c5e; --border: #4c566a;
-  --accent: #88c0d0; --accent-dim: #81a1c1; --text: #eceff4; --muted: #a9b2bc;
-  --danger: #bf616a; --success: #a3be8c; --savings: #88c0d0; --cc: #ebcb8b;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-[data-theme="nord-light"] {
-  --bg: #eceff4; --surface: #e5e9f0; --surface2: #d8dee9; --border: #c0c8d4;
-  --accent: #5e81ac; --accent-dim: #4c6a92; --text: #2e3440; --muted: #5c6674;
-  --danger: #bf616a; --success: #6b8f4a; --savings: #5e81ac; --cc: #c08b30;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-
-/* ── Emerald Night ── */
-[data-theme="emerald-dark"] {
-  --bg: #0a1612; --surface: #0f211a; --surface2: #152b23; --border: #1e3a2e;
-  --accent: #34d399; --accent-dim: #10b981; --text: #d1e8df; --muted: #7ba898;
-  --danger: #f87171; --success: #34d399; --savings: #5eead4; --cc: #fbbf24;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-[data-theme="emerald-light"] {
-  --bg: #f5faf7; --surface: #ffffff; --surface2: #ecf5f0; --border: #c6e3d4;
-  --accent: #059669; --accent-dim: #047857; --text: #0f2e1f; --muted: #5a7d6b;
-  --danger: #dc2626; --success: #059669; --savings: #0d9488; --cc: #b45309;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-
-/* ── Rosewood ── */
-[data-theme="rose-dark"] {
-  --bg: #18101a; --surface: #231a26; --surface2: #2d2331; --border: #3d3342;
-  --accent: #f472b6; --accent-dim: #ec4899; --text: #ede5ef; --muted: #9a8d9f;
-  --danger: #fb7185; --success: #4ade80; --savings: #a78bfa; --cc: #fbbf24;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-[data-theme="rose-light"] {
-  --bg: #fdf5f7; --surface: #ffffff; --surface2: #f5ebef; --border: #e4d4db;
-  --accent: #db2777; --accent-dim: #be185d; --text: #2a1520; --muted: #7d6070;
-  --danger: #e11d48; --success: #15803d; --savings: #7c3aed; --cc: #a16207;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-
-/* ── Amber & Noir ── */
-[data-theme="amber-dark"] {
-  --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424; --border: #333333;
-  --accent: #f59e0b; --accent-dim: #d97706; --text: #e5e5e5; --muted: #8a8a8a;
-  --danger: #ef4444; --success: #22c55e; --savings: #3b82f6; --cc: #f59e0b;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-[data-theme="amber-light"] {
-  --bg: #faf9f6; --surface: #ffffff; --surface2: #f0ede8; --border: #d6d0c6;
-  --accent: #b45309; --accent-dim: #92400e; --text: #1c1917; --muted: #78716c;
-  --danger: #dc2626; --success: #16a34a; --savings: #2563eb; --cc: #b45309;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-
-/* ── Deep Ocean ── */
-[data-theme="ocean-dark"] {
-  --bg: #0b1222; --surface: #111d32; --surface2: #17253e; --border: #233552;
-  --accent: #38bdf8; --accent-dim: #0ea5e9; --text: #cbd5e1; --muted: #7c8fa4;
-  --danger: #f87171; --success: #4ade80; --savings: #38bdf8; --cc: #fb923c;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}
-[data-theme="ocean-light"] {
-  --bg: #f0f7ff; --surface: #ffffff; --surface2: #e8f0fc; --border: #bfcfe0;
-  --accent: #0284c7; --accent-dim: #0369a1; --text: #0c1929; --muted: #5b7491;
-  --danger: #dc2626; --success: #15803d; --savings: #0284c7; --cc: #c2410c;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
-}

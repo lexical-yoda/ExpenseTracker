@@ -64,7 +64,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 
 | Feature | Description |
 |---------|-------------|
-| **7 color themes** | GitHub, Indigo, Nord, Emerald, Rose, Amber, Ocean — each with dark and light modes |
+| **Dark & light modes** | Fold-inspired color palette, with a dark and a light mode |
 | **Email-to-expense** | Paste bank emails or automate via n8n + local LLM to auto-parse transactions |
 | **CSV export** | Download filtered transactions for tax filing or sharing |
 | **Undo delete** | Restore accidentally deleted transactions (up to 20 per session) |

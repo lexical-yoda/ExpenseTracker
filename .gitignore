@@ -11,3 +11,6 @@ scripts/rebuild_cc.py
 
 # Environment
 .env
+
+# Decompiled third-party APK (fold.money teardown) — not this project's code, don't commit
+fold-apk/

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#0d1117">
+  <meta name="theme-color" content="#1f1f1f">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>Analytics — Expense Manager</title>
@@ -125,6 +125,60 @@
       padding: 7px 14px; cursor: pointer; transition: all 0.15s; text-transform: uppercase; letter-spacing: 0.5px;
     }
     .date-range-apply:hover { opacity: 0.85; }
+
+    /* Insight sentence */
+    .insight-line {
+      background: var(--bg-surface, var(--surface));
+      border: 1px solid var(--border-default, var(--border));
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      color: var(--fg-default, var(--text));
+      margin-bottom: 16px;
+    }
+    .insight-line strong { color: var(--accent); }
+
+    /* Category breakdown donut */
+    .cat-breakdown-card {
+      background: var(--bg-surface, var(--surface));
+      border: 1px solid var(--border-default, var(--border));
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .cat-breakdown-donut-wrap { width: 150px; height: 150px; flex-shrink: 0; }
+    .cat-breakdown-legend { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 200px; }
+    .cat-breakdown-legend-row { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; }
+    .cat-breakdown-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .cat-breakdown-legend-name { flex: 1; color: var(--fg-default, var(--text)); }
+    .cat-breakdown-legend-val { font-family: var(--font-display); font-weight: 600; }
+    .cat-breakdown-legend-trend { font-size: 0.68rem; min-width: 42px; text-align: right; }
+    .cat-breakdown-empty { color: var(--fg-muted, var(--muted)); font-size: 0.8rem; }
+
+    /* Merchant list (in-row bar instead of a separate bar chart) */
+    .merchant-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; position: relative; }
+    .merchant-row:last-child { margin-bottom: 0; }
+    .merchant-bar-bg {
+      position: absolute; inset: 0; border-radius: 4px;
+      background: var(--bg-inset, var(--surface2));
+      z-index: 0;
+    }
+    .merchant-bar-fill {
+      position: absolute; top: 0; left: 0; bottom: 0; border-radius: 4px;
+      opacity: 0.22; transition: width 0.5s ease; z-index: 0;
+    }
+    .merchant-row-content {
+      position: relative; z-index: 1; display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 6px 8px;
+    }
+    .merchant-name { flex: 1; font-size: 0.78rem; color: var(--fg-default, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .merchant-amount { font-family: var(--font-display); font-weight: 600; font-size: 0.8rem; flex-shrink: 0; }
+    .merchant-trend { font-size: 0.68rem; flex-shrink: 0; min-width: 40px; text-align: right; }
   </style>
 </head>
 <body>
@@ -189,6 +243,23 @@
     </div>
   </div>
 
+  <!-- Insight sentence — narrates the This Month vs Last Month comparison
+       already computed for the Period Summary stat card above, instead of
+       leaving the reader to connect a bare percentage to "why". Same numbers,
+       just said in a sentence instead of only a delta. -->
+  <div class="insight-line" id="insight-line" style="display:none;"></div>
+
+  <!-- Category breakdown — donut leads, numbers/trend as legend beside it,
+       for whichever period the filter pills above have selected. Supplements
+       the 6-month trend line below (that shows change-over-time; this shows
+       this-period's share at a glance), not a replacement for it. -->
+  <div class="section-label">Category Breakdown (this period)</div>
+  <div class="cat-breakdown-card" id="cat-breakdown-card">
+    <div class="cat-breakdown-empty" id="cat-breakdown-empty" style="display:none;">No expenses in this period</div>
+    <div class="cat-breakdown-donut-wrap" id="chart-cat-donut"></div>
+    <div class="cat-breakdown-legend" id="cat-breakdown-legend"></div>
+  </div>
+
   <!-- Charts -->
   <div class="charts-grid">
     <div class="chart-card full-width">
@@ -201,9 +272,17 @@
       <div class="chart-wrap" id="chart-dow" style="height:280px"></div>
     </div>
 
+    <!-- Top merchants — rendered as a list with an in-row proportional bar
+         behind each name (visual pattern recognition without a context-switch
+         to a different chart type), not a separate Plotly bar chart. This is
+         itself a semantic list (readable by a screen reader natively), so it
+         doesn't need the "view as table" fallback the Plotly charts use —
+         that pattern exists specifically to work around Plotly's SVG/canvas
+         output having no screen-reader-usable content, which doesn't apply
+         here. -->
     <div class="chart-card">
       <div class="chart-title">Top 10 Merchants</div>
-      <div class="chart-wrap" id="chart-merchants" style="height:280px"></div>
+      <div id="merchant-list"></div>
     </div>
 
     <div class="chart-card full-width">
@@ -327,6 +406,29 @@
     return { pct: Math.abs(pct), dir };
   }
 
+  // Previous period of the same length, immediately preceding the given range.
+  // Used for trend arrows on the category donut and merchant list so both work
+  // consistently across every filter pill (week/month/3months/ytd/custom), not
+  // just a hardcoded "vs last month".
+  function getPreviousRange(range) {
+    if (!range.start || !range.end) return null; // 'all' — no meaningful previous period
+    const start = new Date(range.start + 'T12:00:00');
+    const end = new Date(range.end + 'T12:00:00');
+    const days = Math.round((end - start) / 86400000) + 1;
+    const prevEnd = new Date(start);
+    prevEnd.setDate(prevEnd.getDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevStart.getDate() - (days - 1));
+    return { start: toYMD(prevStart), end: toYMD(prevEnd) };
+  }
+
+  function trendArrowHTML(change) {
+    if (!change || change.dir === 'neutral') return '<span class="neutral">—</span>';
+    return change.dir === 'up'
+      ? `<span class="up">▲${change.pct}%</span>`
+      : `<span class="down">▼${change.pct}%</span>`;
+  }
+
   function renderComparison(elId, change) {
     const el = document.getElementById(elId);
     if (!el) return;
@@ -413,6 +515,37 @@
 
     triggerFadeIn('#period-stats');
 
+    // ═══ Insight sentence ═══
+    // Narrates the This Month vs Last Month numbers already computed above —
+    // same values, said as a sentence instead of left as a bare delta.
+    (function renderInsight() {
+      const el = document.getElementById('insight-line');
+      if (thisMonthTotal <= 0) { el.style.display = 'none'; return; }
+      const thisMonthTxns = allTxns.filter(inDateRange(thisMonthStart, thisMonthEnd));
+      const thisMonthByCat = {};
+      thisMonthTxns.forEach(t => {
+        const cat = t.category || 'Other';
+        thisMonthByCat[cat] = (thisMonthByCat[cat] || 0) + t.amount;
+      });
+      const topCatEntry = Object.entries(thisMonthByCat).sort((a, b) => b[1] - a[1])[0];
+      const topCatPhrase = topCatEntry ? `, mostly <strong>${escHTML(topCatEntry[0])}</strong>` : '';
+
+      if (lastMonthTotal <= 0) {
+        el.innerHTML = `You've spent <strong>${fmt(thisMonthTotal)}</strong> this month${topCatPhrase}.`;
+      } else {
+        const diff = thisMonthTotal - lastMonthTotal;
+        const pct = Math.round((Math.abs(diff) / lastMonthTotal) * 100);
+        if (Math.abs(diff) < 1) {
+          el.innerHTML = `Spending's flat vs last month${topCatPhrase}.`;
+        } else if (diff > 0) {
+          el.innerHTML = `<strong>${pct}% more</strong> than last month${topCatPhrase}.`;
+        } else {
+          el.innerHTML = `<strong>${pct}% less</strong> than last month${topCatPhrase}.`;
+        }
+      }
+      el.style.display = '';
+    })();
+
     // ═══ Category Trends ═══
     const months = [];
     for (let i = 5; i >= 0; i--) {
@@ -460,6 +593,66 @@
       removeChartTable('chart-cat-trends-table');
     }
 
+    // ═══ Category Breakdown donut (this period, respects the filter pills) ═══
+    (function renderCatBreakdown() {
+      const donutWrap = document.getElementById('chart-cat-donut');
+      const legend = document.getElementById('cat-breakdown-legend');
+      const emptyEl = document.getElementById('cat-breakdown-empty');
+
+      const periodCatTotals = {};
+      txns.forEach(t => {
+        const cat = t.category || 'Other';
+        periodCatTotals[cat] = (periodCatTotals[cat] || 0) + t.amount;
+      });
+      const entries = Object.entries(periodCatTotals).sort((a, b) => b[1] - a[1]);
+
+      if (entries.length === 0) {
+        emptyEl.style.display = '';
+        donutWrap.style.display = 'none';
+        legend.style.display = 'none';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      donutWrap.style.display = '';
+      legend.style.display = '';
+
+      // Previous-period totals per category, for the legend's trend arrows —
+      // same getPreviousRange helper the merchant list below uses, so both
+      // read the same way ("did this go up or down") across the whole page.
+      const prevRange = getPreviousRange(range);
+      const prevCatTotals = {};
+      if (prevRange) {
+        allTxns.filter(inDateRange(prevRange.start, prevRange.end)).forEach(t => {
+          const cat = t.category || 'Other';
+          prevCatTotals[cat] = (prevCatTotals[cat] || 0) + t.amount;
+        });
+      }
+
+      const labels = entries.map(e => e[0]);
+      const values = entries.map(e => e[1]);
+      const colors = labels.map(l => stableColor(l, c.CAT_COLORS));
+
+      Plotly.react('chart-cat-donut', [{
+        labels, values, type: 'pie', hole: 0.6,
+        marker: { colors },
+        textinfo: 'none',
+        hovertemplate: '<b>%{label}</b><br>₹%{value:,.0f}<br>%{percent}<extra></extra>',
+      }], { ...plotLayout(), margin: { t: 4, b: 4, l: 4, r: 4 }, showlegend: false }, plotConfig);
+
+      legend.innerHTML = entries.slice(0, 6).map((e, i) => {
+        const trend = prevRange ? trendArrowHTML(pctChange(e[1], prevCatTotals[e[0]] || 0)) : '';
+        return `<div class="cat-breakdown-legend-row">
+          <span class="cat-breakdown-dot" style="background:${colors[i]}"></span>
+          <span class="cat-breakdown-legend-name">${escHTML(e[0])}</span>
+          <span class="cat-breakdown-legend-trend">${trend}</span>
+          <span class="cat-breakdown-legend-val">${fmt(e[1])}</span>
+        </div>`;
+      }).join('');
+      // No "view as table" fallback here — the legend above is already plain
+      // accessible text with the same category/amount data, unlike the
+      // Plotly donut itself which is decorative alongside it.
+    })();
+
     // ═══ Day of Week Pattern ═══
     const dowTotals = [0, 0, 0, 0, 0, 0, 0]; // Mon-Sun
     const dowCounts = [0, 0, 0, 0, 0, 0, 0];
@@ -497,24 +690,38 @@
       merchants[normalized] = (merchants[normalized] || 0) + t.amount;
     });
 
-    const topMerchants = Object.entries(merchants).sort((a, b) => b[1] - a[1]).slice(0, 10).reverse();
+    const topMerchants = Object.entries(merchants).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const merchantListEl = document.getElementById('merchant-list');
 
     if (topMerchants.length > 0) {
-      Plotly.react('chart-merchants', [{
-        x: topMerchants.map(e => e[1]),
-        y: topMerchants.map(e => e[0]),
-        type: 'bar', orientation: 'h',
-        marker: { color: topMerchants.map(e => stableColor(e[0], c.CAT_COLORS)) },
-        hovertemplate: '<b>%{y}</b><br>₹%{x:,.0f}<extra></extra>',
-      }], plotLayout({
-        margin: { t: 10, b: 30, l: 160, r: 20 },
-        yaxis: { automargin: true },
-      }), plotConfig);
-      renderChartTable('chart-merchants', 'chart-merchants-table', ['Merchant', 'Total'],
-        [...topMerchants].reverse().map(e => [e[0], fmt(e[1])]));
+      // Previous-period merchant totals for trend arrows — same
+      // getPreviousRange helper the category donut above uses.
+      const prevRange = getPreviousRange(range);
+      const prevMerchants = {};
+      if (prevRange) {
+        allTxns.filter(inDateRange(prevRange.start, prevRange.end)).forEach(t => {
+          const name = (t.description || '').trim().replace(/\s*\(.*\)$/, '').trim();
+          if (!name) return;
+          prevMerchants[name] = (prevMerchants[name] || 0) + t.amount;
+        });
+      }
+      const maxAmt = topMerchants[0][1];
+      merchantListEl.innerHTML = topMerchants.map(([name, amt]) => {
+        const barPct = maxAmt > 0 ? (amt / maxAmt) * 100 : 0;
+        const color = stableColor(name, c.CAT_COLORS);
+        const trend = prevRange ? trendArrowHTML(pctChange(amt, prevMerchants[name] || 0)) : '';
+        return `<div class="merchant-row">
+          <div class="merchant-bar-bg"></div>
+          <div class="merchant-bar-fill" style="width:${barPct}%;background:${color}"></div>
+          <div class="merchant-row-content">
+            <span class="merchant-name">${escHTML(name)}</span>
+            <span class="merchant-trend">${trend}</span>
+            <span class="merchant-amount" style="color:${color}">${fmt(amt)}</span>
+          </div>
+        </div>`;
+      }).join('');
     } else {
-      document.getElementById('chart-merchants').innerHTML = '<div class="chart-empty">No merchant data available</div>';
-      removeChartTable('chart-merchants-table');
+      merchantListEl.innerHTML = '<div class="chart-empty">No merchant data available</div>';
     }
 
     // ═══ Spending Velocity ═══

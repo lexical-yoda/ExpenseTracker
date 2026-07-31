@@ -16,6 +16,7 @@ from spreadsheet import (
     get_all_transactions, add_transaction, get_transaction_by_id,
     get_monthly_summary, update_transaction, delete_transaction,
     rename_account_in_sheets, compute_account_balances,
+    get_account_balance_history,
     _accounts_lock
 )
 import plan as plan_lib
@@ -568,12 +569,13 @@ def dashboard():
     summary = get_monthly_summary()
     accounts = load_accounts()
     balances = compute_account_balances()
+    balance_history = get_account_balance_history()
     nw_increment, _ = get_nw_goal()
     email_config = load_email_config()
     show_email_setup = not email_config or not email_config.get('enabled')
     has_activity = bool(get_all_transactions())
     snapshot_networth_if_needed()
-    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, nw_goal_increment=nw_increment, show_email_setup=show_email_setup, has_activity=has_activity)
+    return render_template('dashboard.html', summary=summary, accounts=accounts, balances=balances, balance_history=balance_history, nw_goal_increment=nw_increment, show_email_setup=show_email_setup, has_activity=has_activity)
 
 
 @app.route('/analytics')
@@ -1432,12 +1434,12 @@ def api_paste_draft():
     config = load_email_config()
     if not config or not config.get('enabled') or not config.get('llm_url'):
         log_pipeline_event('failed', 'paste', error='LLM not configured')
-        return jsonify({'success': False, 'error': 'LLM not configured. Go to Settings to set up.'}), 400
+        return jsonify({'success': False, 'error': "LLM isn't set up yet — head to Settings to connect one."}), 400
 
     data = request.get_json(silent=True) or {}
     text = data.get('text', '').strip()
     if not text:
-        return jsonify({'success': False, 'error': 'No text provided'}), 400
+        return jsonify({'success': False, 'error': "Paste something first — can't parse thin air."}), 400
 
     from email_parser import strip_email_html, parse_with_llm, build_default_prompt
 
@@ -1452,7 +1454,7 @@ def api_paste_draft():
     parsed = parse_with_llm(email_text, config['llm_url'], system_prompt)
     if not parsed:
         log_pipeline_event('failed', 'paste', email_preview=email_text, error='LLM failed to parse email')
-        return jsonify({'success': False, 'error': 'Could not parse the email text. Check your LLM configuration.'}), 422
+        return jsonify({'success': False, 'error': "Couldn't make sense of that email — check your LLM configuration, or try pasting the full message with headers included."}), 422
 
     apply_currency_conversion(parsed)
 
@@ -1977,8 +1979,8 @@ def pwa_manifest():
         'description': 'Personal expense tracker with multi-account support',
         'start_url': '/',
         'display': 'standalone',
-        'background_color': '#0d1117',
-        'theme_color': '#0d1117',
+        'background_color': '#1f1f1f',
+        'theme_color': '#1f1f1f',
         'orientation': 'portrait',
         'icons': [
             {'src': '/static/icon-192.png', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any maskable'},

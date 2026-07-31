@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#0d1117">
+  <meta name="theme-color" content="#1f1f1f">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>Dashboard — Expense Manager</title>
@@ -107,6 +107,49 @@
     .chart-wrap { width: 100%; }
     #chart-daily .plotly .cursor-pointer, #chart-daily .nsewdrag { cursor: pointer !important; }
 
+    /* Cash-flow donut card */
+    .cash-flow-card {
+      background: var(--bg-surface, var(--surface));
+      border: 1px solid var(--border-default, var(--border));
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .cash-flow-donut-wrap { width: 130px; height: 130px; flex-shrink: 0; }
+    .cash-flow-legend { display: flex; gap: 28px; flex-wrap: wrap; }
+    .cash-flow-legend-item { display: flex; align-items: center; gap: 10px; }
+    .cash-flow-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .cash-flow-legend-val { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; }
+    .cash-flow-empty { font-size: 0.75rem; color: var(--fg-muted, var(--muted)); }
+
+    /* CC consolidated summary card (due date + utilization + cycle spend, one glance) */
+    .cc-summary-card {
+      background: var(--bg-surface, var(--surface));
+      border: 1px solid var(--border-default, var(--border));
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 10px;
+    }
+    .cc-summary-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .cc-summary-name { font-family: var(--font-display); font-weight: 600; font-size: 0.9rem; color: var(--fg-default, var(--text)); }
+    .cc-summary-due { font-size: 0.72rem; color: var(--fg-muted, var(--muted)); }
+    .cc-summary-amount { font-family: var(--font-display); font-weight: 700; font-size: 1.8rem; color: var(--cc); line-height: 1.1; }
+    .cc-summary-sub { font-size: 0.72rem; color: var(--fg-muted, var(--muted)); margin-top: 2px; margin-bottom: 12px; }
+    .cc-util-bar-track {
+      width: 100%; height: 8px; border-radius: 50px;
+      background: var(--bg-inset, var(--surface2));
+      overflow: hidden; margin-bottom: 16px;
+    }
+    .cc-util-bar-fill { height: 100%; border-radius: 50px; background: var(--success); transition: width 0.6s ease, background 0.3s ease; }
+    .cc-summary-footer { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .cc-summary-footer-item { font-size: 0.85rem; }
+    .cc-summary-footer-item strong { font-family: var(--font-display); font-size: 0.95rem; }
+    @media (max-width: 480px) { .cc-summary-amount { font-size: 1.4rem; } }
+
     /* Account balance cards */
     .acct-balances {
       display: grid;
@@ -133,6 +176,9 @@
     .acct-bal-name { font-size: 0.8rem; font-weight: 500; margin-bottom: 2px; }
     .acct-bal-detail { font-size: 0.65rem; color: var(--muted); }
     .acct-bal-amount { font-family: var(--font-display); font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+    .acct-bal-spark { flex-shrink: 0; display: flex; align-items: center; }
+    .acct-sparkline-empty { font-size: 0.6rem; color: var(--fg-muted, var(--muted)); max-width: 64px; line-height: 1.2; }
+    @media (max-width: 480px) { .acct-bal-spark { display: none; } }
 
     /* Recent transactions */
     .recent-list { margin-top: 4px; }
@@ -209,7 +255,7 @@
   {% if not has_activity %}
   <div id="getting-started-banner" style="background:var(--surface); border:1px solid var(--accent); border-radius:8px; padding:14px 20px; margin-bottom:16px;">
     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-      <strong style="color:var(--accent);">Welcome — here's how to get started</strong>
+      <strong style="color:var(--accent);">Welcome — your money isn't going to track itself</strong>
       <button onclick="this.closest('#getting-started-banner').style.display='none'; localStorage.setItem('hideGettingStartedBanner','1')" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:1.1rem; padding:4px;">&times;</button>
     </div>
     <ol style="margin:10px 0 0 18px; padding:0; font-size:0.85rem; color:var(--muted); line-height:1.9;">
@@ -280,6 +326,32 @@
     <div id="nw-breakdown" style="margin-top:16px;"></div>
   </div>
 
+  <!-- Cash flow — donut leads, numbers as legend beside it, so the period's
+       income/expense split reads as one shape at a glance instead of two
+       separate flat numbers the user has to mentally compare themselves.
+       Feeds off the exact same totalIncome/totalExpense values as the stat
+       tiles below — no separate computation, so the two can never disagree. -->
+  <div class="cash-flow-card" id="cash-flow-card">
+    <div class="cash-flow-empty" id="cash-flow-empty" style="display:none;">No income or expense in this period yet</div>
+    <div class="cash-flow-donut-wrap" id="chart-cashflow-donut"></div>
+    <div class="cash-flow-legend">
+      <div class="cash-flow-legend-item">
+        <span class="cash-flow-dot" style="background:var(--success)"></span>
+        <div>
+          <div class="stat-label">Income</div>
+          <div class="cash-flow-legend-val" id="cashflow-income">₹0</div>
+        </div>
+      </div>
+      <div class="cash-flow-legend-item">
+        <span class="cash-flow-dot" style="background:var(--danger)"></span>
+        <div>
+          <div class="stat-label">Expense</div>
+          <div class="cash-flow-legend-val" id="cashflow-expense">₹0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Stat cards -->
   <div class="stats-row" id="stats-row">
     <div class="stat-card">
@@ -315,6 +387,35 @@
   <!-- CC Billing Cycle -->
   <div id="billing-cycle-section" style="display:none; margin-bottom: 24px;">
     <div class="section-label">Credit Card Billing Cycle</div>
+
+    <!-- Consolidated summary card — due-adjacent date, utilization bar, cycle spend and
+         projection in one glance, instead of spreading across the stat-tile grid below. -->
+    <div class="cc-summary-card" id="cc-summary-card">
+      <div class="cc-summary-top">
+        <div class="cc-summary-name" id="cc-summary-name">—</div>
+        <div class="cc-summary-due" id="cc-summary-due">—</div>
+      </div>
+      <div class="cc-summary-amount" id="cc-summary-outstanding">₹0</div>
+      <div class="cc-summary-sub">of <span id="cc-summary-limit">₹0</span> limit</div>
+      <div class="cc-util-bar-track">
+        <div class="cc-util-bar-fill" id="cc-util-bar-fill" style="width:0%"></div>
+      </div>
+      <div class="cc-summary-footer">
+        <div class="cc-summary-footer-item">
+          <div class="stat-label">This Cycle</div>
+          <strong id="cc-summary-cycle-spend">₹0</strong>
+        </div>
+        <div class="cc-summary-footer-item">
+          <div class="stat-label">Projected Bill</div>
+          <strong id="cc-summary-projected">₹0</strong>
+        </div>
+        <div class="cc-summary-footer-item">
+          <div class="stat-label">Days Left</div>
+          <strong id="cc-summary-days">0</strong>
+        </div>
+      </div>
+    </div>
+
     <div class="stats-row" id="billing-stats">
       <div class="stat-card">
         <div class="stat-label">Current Cycle Spend</div>
@@ -386,6 +487,33 @@
   const rawSummary = {{ summary|tojson }};
   const accountsData = {{ accounts|tojson }};
   const balancesData = {{ balances|tojson }};
+  const balanceHistoryData = {{ balance_history|tojson }};
+
+  // ── Tiny inline SVG sparkline (balance trend per account) ──
+  // Deliberately not a Plotly instance — this renders per account card, and a
+  // dashboard can have a dozen+ accounts; a dozen Plotly charts for a 60x20px
+  // decoration would be needlessly heavy. Needs 2+ history points; accounts
+  // freshly added (or upgraded from before this feature existed) won't have
+  // any yet, which is expected, not a bug — see the "not enough history"
+  // fallback below.
+  function sparklineSVG(points, color) {
+    if (!points || points.length < 2) {
+      return '<span class="acct-sparkline-empty">Not enough history yet</span>';
+    }
+    const w = 64, h = 22, pad = 2;
+    const vals = points.map(p => p.balance);
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const range = (max - min) || 1;
+    const stepX = (w - pad * 2) / (points.length - 1);
+    const coords = vals.map((v, i) => {
+      const x = pad + i * stepX;
+      const y = pad + (1 - (v - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return `<svg class="acct-sparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+  }
 
   const accountTypeMap = {};
   accountsData.forEach(a => accountTypeMap[a.name] = a.type);
@@ -574,12 +702,16 @@
       const isSavings = b.type === 'savings';
       const amount = isSavings ? fmt(b.current_balance || 0) : fmt(b.remaining || 0);
       const detail = isSavings ? 'Current balance' : `Spent ${fmt(b.accumulated || 0)} of ${fmt(b.limit || 0)}`;
+      const color = getComputedStyle(document.documentElement).getPropertyValue(isSavings ? '--savings' : '--cc').trim();
+      const history = (balanceHistoryData[String(b.id)] || []).slice(-30);
+      const sparkline = sparklineSVG(history, color);
       return `<div class="acct-bal-card">
         <span class="acct-bal-dot ${escHTML(b.type)}"></span>
         <div class="acct-bal-info">
           <div class="acct-bal-name">${escHTML(b.name)}</div>
           <div class="acct-bal-detail">${detail}</div>
         </div>
+        <div class="acct-bal-spark">${sparkline}</div>
         <div class="acct-bal-amount" style="color:var(--${isSavings ? 'savings' : 'cc'})">${amount}</div>
       </div>`;
     }).join('');
@@ -763,6 +895,25 @@
       }
     }
 
+    // Consolidated summary card — same computed values as the stat-tile grid below,
+    // just presented as one glance instead of spread across separate tiles.
+    const limit = cc.limit || 0;
+    const utilPct = limit > 0 ? Math.min(100, (totalOutstanding / limit) * 100) : 0;
+    let utilColor = 'var(--success)';
+    if (utilPct >= 90) utilColor = 'var(--danger)';
+    else if (utilPct >= 70) utilColor = 'var(--cc)';
+
+    document.getElementById('cc-summary-name').textContent = cc.name;
+    document.getElementById('cc-summary-due').textContent = `Next cycle starts ${fmtDate(cycleEnd)} +1`;
+    document.getElementById('cc-summary-outstanding').textContent = fmt(totalOutstanding);
+    document.getElementById('cc-summary-limit').textContent = fmt(limit);
+    document.getElementById('cc-summary-cycle-spend').textContent = fmt(cycleSpend);
+    document.getElementById('cc-summary-projected').textContent = fmt(projected);
+    document.getElementById('cc-summary-days').textContent = daysRemaining;
+    const utilFill = document.getElementById('cc-util-bar-fill');
+    utilFill.style.width = utilPct + '%';
+    utilFill.style.background = utilColor;
+
     document.getElementById('billing-spent').textContent = fmt(cycleSpend);
     document.getElementById('billing-period').textContent = `${fmtDate(cycleStart)} — ${fmtDate(cycleEnd)}`;
     document.getElementById('billing-days').textContent = daysRemaining;
@@ -886,9 +1037,47 @@
     }).join('');
   }
 
+  // ── Cash-flow donut ──
+  // Same totalIncome/totalExpense values the stat tiles below render — this
+  // is a second view of the same numbers, never a second computation of them.
+  function renderCashFlowDonut(totalIncome, totalExpense) {
+    const c = getThemeColors();
+    const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim();
+    const donutWrap = document.getElementById('chart-cashflow-donut');
+    const legend = document.querySelector('#cash-flow-card .cash-flow-legend');
+    const emptyEl = document.getElementById('cash-flow-empty');
+    if (totalIncome <= 0 && totalExpense <= 0) {
+      emptyEl.style.display = '';
+      donutWrap.style.display = 'none';
+      legend.style.display = 'none';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    donutWrap.style.display = '';
+    legend.style.display = '';
+    Plotly.react('chart-cashflow-donut', [{
+      labels: ['Income', 'Expense'],
+      values: [totalIncome, totalExpense],
+      type: 'pie',
+      hole: 0.6,
+      marker: { colors: [c.SUCCESS, dangerColor] },
+      textinfo: 'none',
+      hovertemplate: '<b>%{label}</b><br>₹%{value:,.0f}<br>%{percent}<extra></extra>',
+    }], {
+      ...plotLayout(),
+      margin: { t: 4, b: 4, l: 4, r: 4 },
+      showlegend: false,
+    }, plotConfig);
+    document.getElementById('cashflow-income').textContent = fmt(totalIncome);
+    document.getElementById('cashflow-expense').textContent = fmt(totalExpense);
+    renderChartTable('chart-cashflow-donut', 'chart-cashflow-donut-table', ['Type', 'Amount'],
+      [['Income', fmt(totalIncome)], ['Expense', fmt(totalExpense)]]);
+  }
+
   function renderAll(filter, animate = true) {
     const { daily, byCat, byAcc, totalIncome, totalExpense, txnCount, avgDaily, spentToday, recentTxns } = filterData(filter);
     const c = getThemeColors();
+    renderCashFlowDonut(totalIncome, totalExpense);
 
     // Stats with animated counters
     if (animate) {
@@ -984,6 +1173,7 @@
         fillcolor: c.FILL_ALPHA,
         hovertemplate: '<b>%{x}</b><br>Avg: ₹%{y:,.0f}/day<extra></extra>',
       }], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), plotConfig);
+      renderChartTable('chart-cumavg', 'chart-cumavg-table', ['Date', 'Cumulative Avg/Day'], cumAvgDates.map((d, i) => [d, fmt(cumAvgVals[i])]));
     } else {
       Plotly.react('chart-cumavg', [], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), plotConfig);
     }

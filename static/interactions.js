@@ -305,6 +305,208 @@ if ('serviceWorker' in navigator) {
 })();
 
 
+// ── 9. Shared search predicate ──
+// Used by both manage.html's own #search field and the Cmd+K global overlay
+// below, so the two can never disagree about what "matches" a query.
+function matchesSearchQuery(description, category, query) {
+  const q = (query || '').toLowerCase().trim();
+  if (!q) return true;
+  return (description || '').toLowerCase().includes(q) || (category || '').toLowerCase().includes(q);
+}
+
+
+// ── 10. Cmd+K global search ──
+// Self-initializing (like the help-icons feature above) — works on every page
+// that loads interactions.js, no per-page init call needed. Fetches
+// /api/transactions lazily (only when the overlay is first opened, not on
+// every page load) and filters client-side with the same predicate manage.html
+// uses. Selecting a result or pressing Enter navigates to
+// /manage?search=<query>, which manage.html's own URL-param handling picks up
+// (same pattern already used there for ?date= from dashboard chart clicks).
+(function() {
+  let overlay = null;
+  let inputEl = null;
+  let resultsEl = null;
+  let allTxns = null; // fetched lazily, cached for the life of the page
+  let activeIndex = -1;
+  let previouslyFocused = null; // for focus-return on close
+
+  function injectStyles() {
+    if (document.getElementById('cmdk-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'cmdk-styles';
+    style.textContent = `
+      .cmdk-backdrop {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
+      }
+      .cmdk-panel {
+        background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+        width: 90vw; max-width: 520px; max-height: 60vh; overflow: hidden;
+        display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+      }
+      .cmdk-input {
+        width: 100%; background: none; border: none; border-bottom: 1px solid var(--border);
+        color: var(--text); font-family: var(--font-mono); font-size: 0.95rem;
+        padding: 16px 18px; outline: none;
+      }
+      .cmdk-results { overflow-y: auto; }
+      .cmdk-empty { padding: 20px 18px; color: var(--muted); font-size: 0.8rem; text-align: center; }
+      .cmdk-row {
+        display: flex; align-items: center; gap: 10px; padding: 10px 18px;
+        cursor: pointer; font-size: 0.82rem; border-bottom: 1px solid var(--border);
+      }
+      .cmdk-row:last-child { border-bottom: none; }
+      .cmdk-row:hover, .cmdk-row.active { background: var(--surface2); }
+      .cmdk-row-desc { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+      .cmdk-row-meta { color: var(--muted); font-size: 0.68rem; flex-shrink: 0; }
+      .cmdk-row-amount { font-family: var(--font-display); font-weight: 600; flex-shrink: 0; }
+      .cmdk-hint {
+        padding: 8px 18px; font-size: 0.65rem; color: var(--muted);
+        border-top: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.5px;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function fmtAmt(n) {
+    return '₹' + Math.round(n).toLocaleString('en-IN');
+  }
+
+  function renderResults(query) {
+    const q = query.trim();
+    if (!q) {
+      resultsEl.innerHTML = '<div class="cmdk-empty">Type to search transactions by description or category…</div>';
+      activeIndex = -1;
+      return;
+    }
+    const matches = allTxns
+      .filter(t => !t.parent_id && matchesSearchQuery(t.description, t.category, q))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 8);
+    if (matches.length === 0) {
+      resultsEl.innerHTML = '<div class="cmdk-empty">No matching transactions</div>';
+      activeIndex = -1;
+      return;
+    }
+    const esc = s => { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; };
+    resultsEl.innerHTML = matches.map((t, i) => {
+      const sign = t.type === 'Income' ? '+' : t.type === 'Transfer' ? '⇄' : '-';
+      // Description isn't put in an HTML attribute here (textContent->innerHTML
+      // escaping handles &/</> for text nodes but not quote characters, which
+      // would break out of an attribute value) — set as a DOM property instead
+      // right after insertion, below, which is quote-safe regardless of content.
+      return `<div class="cmdk-row${i === 0 ? ' active' : ''}" role="option" id="cmdk-opt-${i}" aria-selected="${i === 0}">
+        <span class="cmdk-row-desc">${esc(t.description)}</span>
+        <span class="cmdk-row-meta">${esc(t.category)} · ${esc(t.date)}</span>
+        <span class="cmdk-row-amount">${sign}${fmtAmt(t.amount)}</span>
+      </div>`;
+    }).join('');
+    Array.from(resultsEl.querySelectorAll('.cmdk-row')).forEach((row, i) => {
+      row.dataset.desc = matches[i].description;
+    });
+    activeIndex = 0;
+    if (matches.length) inputEl.setAttribute('aria-activedescendant', 'cmdk-opt-0');
+    else inputEl.removeAttribute('aria-activedescendant');
+  }
+
+  function goToManage(query) {
+    window.location.href = '/manage?search=' + encodeURIComponent(query);
+  }
+
+  function openOverlay() {
+    injectStyles();
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'cmdk-backdrop';
+      overlay.innerHTML = `
+        <div class="cmdk-panel" role="dialog" aria-modal="true" aria-label="Search transactions">
+          <input class="cmdk-input" type="text" placeholder="Search transactions…" autocomplete="off"
+                 aria-label="Search transactions by description or category" role="combobox"
+                 aria-expanded="true" aria-controls="cmdk-results-list" aria-autocomplete="list">
+          <div class="cmdk-results" id="cmdk-results-list" role="listbox" aria-label="Search results"></div>
+          <div class="cmdk-hint">Esc to close · Enter to jump to Manage</div>
+        </div>`;
+      document.body.appendChild(overlay);
+      inputEl = overlay.querySelector('.cmdk-input');
+      resultsEl = overlay.querySelector('.cmdk-results');
+
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeOverlay(); });
+      inputEl.addEventListener('input', () => renderResults(inputEl.value));
+      resultsEl.addEventListener('click', (e) => {
+        const row = e.target.closest('.cmdk-row');
+        if (row) goToManage(row.dataset.desc);
+      });
+      inputEl.addEventListener('keydown', (e) => {
+        const rows = () => Array.from(resultsEl.querySelectorAll('.cmdk-row'));
+        if (e.key === 'Escape') { e.preventDefault(); closeOverlay(); }
+        else if (e.key === 'Tab') {
+          // Single-field dialog — the input is the only natively focusable
+          // element inside it, so Tab/Shift+Tab just re-focuses it instead of
+          // moving focus to whatever's behind the overlay in the page.
+          e.preventDefault();
+          inputEl.focus();
+        }
+        else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const r = rows(); if (!r.length) return;
+          activeIndex = Math.min(activeIndex + 1, r.length - 1);
+          r.forEach((el, i) => {
+            el.classList.toggle('active', i === activeIndex);
+            el.setAttribute('aria-selected', String(i === activeIndex));
+          });
+          inputEl.setAttribute('aria-activedescendant', r[activeIndex].id);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const r = rows(); if (!r.length) return;
+          activeIndex = Math.max(activeIndex - 1, 0);
+          r.forEach((el, i) => {
+            el.classList.toggle('active', i === activeIndex);
+            el.setAttribute('aria-selected', String(i === activeIndex));
+          });
+          inputEl.setAttribute('aria-activedescendant', r[activeIndex].id);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const r = rows();
+          const active = r[activeIndex] || r[0];
+          if (active) goToManage(active.dataset.desc);
+          else if (inputEl.value.trim()) goToManage(inputEl.value);
+        }
+      });
+    }
+    previouslyFocused = document.activeElement;
+    overlay.style.display = 'flex';
+    inputEl.value = '';
+    inputEl.focus();
+    renderResults('');
+
+    if (!allTxns) {
+      resultsEl.innerHTML = '<div class="cmdk-empty">Loading…</div>';
+      fetch('/api/transactions')
+        .then(r => r.json())
+        .then(data => { allTxns = Array.isArray(data) ? data : []; renderResults(inputEl.value); })
+        .catch(() => { resultsEl.innerHTML = '<div class="cmdk-empty">Couldn\'t load transactions</div>'; });
+    }
+  }
+
+  function closeOverlay() {
+    if (overlay) overlay.style.display = 'none';
+    if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+      previouslyFocused.focus();
+    }
+    previouslyFocused = null;
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (overlay && overlay.style.display === 'flex') closeOverlay();
+      else openOverlay();
+    }
+  });
+})();
+
+
 // ── 7. Relative timestamps ──
 function timeAgo(dateStr) {
   // Compare calendar dates to avoid timezone/time-of-day issues
