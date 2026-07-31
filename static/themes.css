@@ -122,6 +122,15 @@
     flex-direction: column !important;
     align-items: flex-start !important;
   }
+
+  /* iOS Safari auto-zooms the page on focusing any input/select/textarea
+     rendered below 16px — every form in the app sets its inputs at 14-15px
+     for visual density, which is fine on desktop but triggers an unwanted
+     zoom-in on every tap on iPhone. Force 16px on mobile only; desktop
+     sizing (set per-template) is untouched. */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* ── Theme toggle button (shared) ── */
@@ -144,6 +153,52 @@
 }
 .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ── Shared icon action button (edit/delete/track — manage.html & accounts.html) ──
+   Was duplicated per-template at 28x28px, below the ~40px minimum comfortable
+   touch target (Fitts's Law) for a row of adjacent icon buttons on a
+   mobile-first app. Defined once here so both templates stay in sync. */
+.action-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  padding: 0;
+  flex-shrink: 0;
+}
+.action-btn:hover { border-color: var(--accent); color: var(--accent); }
+.action-btn.del:hover { border-color: var(--danger); color: var(--danger); }
+@media (max-width: 600px) {
+  .action-btn { width: 38px; height: 38px; }
+  .txn-actions, .acct-actions { gap: 8px; }
+}
+
+/* ── Shared focus-visible ring for custom controls ──
+   Bespoke buttons/pills style :hover but not :focus, so keyboard users tabbing
+   through got either the browser default (inconsistent with the custom shape)
+   or nothing. Radio/checkbox-driven toggles (Type pickers) hide the input
+   itself (opacity:0), so tabbing through them showed no focus indicator at all. */
+.action-btn:focus-visible,
+.filter-action-btn:focus-visible,
+.filter-pill:focus-visible,
+.filter-select:focus-visible,
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+input[type="radio"]:focus-visible + label,
+input[type="checkbox"]:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Standalone toggle for pages without a nav bar (login, setup) */
 .theme-toggle-fixed {
   position: fixed;
@@ -161,6 +216,15 @@
    THEME DEFINITIONS
    Each theme has a dark and light variant. The attribute format is:
      data-theme="<name>-dark" / data-theme="<name>-light"
+
+   The --bucket-* categorical set (chart colors + plan buckets) uses the SAME
+   6 hex values in every dark AND light block on purpose — validated via the
+   dataviz skill's validate_palette.js against every theme's own surface color:
+   passes the OKLCH lightness band, chroma floor, and CVD-separation checks in
+   both modes. The dark blocks previously used brighter Tailwind-400-style
+   tints (e.g. #60a5fa) that read fine individually but failed the dark-mode
+   lightness band as a set. Don't "brighten for dark mode" here — these mid-tone
+   values are already correct for both.
    ══════════════════════════════════════════════════════════════════════════════ */
 
 /* ── GitHub ── */
@@ -168,41 +232,41 @@
   --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
   --accent: #58a6ff; --accent-dim: #388bfd; --text: #c9d1d9; --muted: #8b949e;
   --danger: #f85149; --success: #3fb950; --savings: #58a6ff; --cc: #d29922;
-  --bucket-blue: #60a5fa; --bucket-amber: #fbbf24; --bucket-green: #4ade80; --bucket-pink: #f472b6; --bucket-gray: #9ca3af;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="github-light"] {
   --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2; --border: #d0d7de;
   --accent: #0969da; --accent-dim: #0550ae; --text: #1f2328; --muted: #656d76;
   --danger: #cf222e; --success: #1a7f37; --savings: #0969da; --cc: #9a6700;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
 /* ── Indigo & Slate ── */
 [data-theme="indigo-dark"] {
   --bg: #0f0f1a; --surface: #1a1a2e; --surface2: #25253d; --border: #333358;
-  --accent: #818cf8; --accent-dim: #6366f1; --text: #e8e8f0; --muted: #7878a0;
+  --accent: #818cf8; --accent-dim: #6366f1; --text: #e8e8f0; --muted: #8484a8;
   --danger: #f87171; --success: #4ade80; --savings: #60a5fa; --cc: #fb923c;
-  --bucket-blue: #60a5fa; --bucket-amber: #fbbf24; --bucket-green: #4ade80; --bucket-pink: #f472b6; --bucket-gray: #9ca3af;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="indigo-light"] {
   --bg: #f5f5f7; --surface: #ffffff; --surface2: #ebebf0; --border: #d1d1db;
   --accent: #4f46e5; --accent-dim: #4338ca; --text: #1e1e2e; --muted: #6b6b8a;
   --danger: #dc2626; --success: #16a34a; --savings: #2563eb; --cc: #ea580c;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
 /* ── Nord Aurora ── */
 [data-theme="nord-dark"] {
   --bg: #2e3440; --surface: #3b4252; --surface2: #434c5e; --border: #4c566a;
-  --accent: #88c0d0; --accent-dim: #81a1c1; --text: #eceff4; --muted: #a0aab5;
+  --accent: #88c0d0; --accent-dim: #81a1c1; --text: #eceff4; --muted: #a9b2bc;
   --danger: #bf616a; --success: #a3be8c; --savings: #88c0d0; --cc: #ebcb8b;
-  --bucket-blue: #60a5fa; --bucket-amber: #fbbf24; --bucket-green: #4ade80; --bucket-pink: #f472b6; --bucket-gray: #9ca3af;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="nord-light"] {
   --bg: #eceff4; --surface: #e5e9f0; --surface2: #d8dee9; --border: #c0c8d4;
-  --accent: #5e81ac; --accent-dim: #4c6a92; --text: #2e3440; --muted: #6a7585;
+  --accent: #5e81ac; --accent-dim: #4c6a92; --text: #2e3440; --muted: #5c6674;
   --danger: #bf616a; --success: #6b8f4a; --savings: #5e81ac; --cc: #c08b30;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
 /* ── Emerald Night ── */
@@ -210,13 +274,13 @@
   --bg: #0a1612; --surface: #0f211a; --surface2: #152b23; --border: #1e3a2e;
   --accent: #34d399; --accent-dim: #10b981; --text: #d1e8df; --muted: #7ba898;
   --danger: #f87171; --success: #34d399; --savings: #5eead4; --cc: #fbbf24;
-  --bucket-blue: #60a5fa; --bucket-amber: #fbbf24; --bucket-green: #4ade80; --bucket-pink: #f472b6; --bucket-gray: #9ca3af;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="emerald-light"] {
   --bg: #f5faf7; --surface: #ffffff; --surface2: #ecf5f0; --border: #c6e3d4;
   --accent: #059669; --accent-dim: #047857; --text: #0f2e1f; --muted: #5a7d6b;
   --danger: #dc2626; --success: #059669; --savings: #0d9488; --cc: #b45309;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
 /* ── Rosewood ── */
@@ -224,13 +288,13 @@
   --bg: #18101a; --surface: #231a26; --surface2: #2d2331; --border: #3d3342;
   --accent: #f472b6; --accent-dim: #ec4899; --text: #ede5ef; --muted: #9a8d9f;
   --danger: #fb7185; --success: #4ade80; --savings: #a78bfa; --cc: #fbbf24;
-  --bucket-blue: #60a5fa; --bucket-amber: #fbbf24; --bucket-green: #4ade80; --bucket-pink: #f472b6; --bucket-gray: #9ca3af;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="rose-light"] {
   --bg: #fdf5f7; --surface: #ffffff; --surface2: #f5ebef; --border: #e4d4db;
   --accent: #db2777; --accent-dim: #be185d; --text: #2a1520; --muted: #7d6070;
   --danger: #e11d48; --success: #15803d; --savings: #7c3aed; --cc: #a16207;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
 /* ── Amber & Noir ── */
@@ -238,13 +302,13 @@
   --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424; --border: #333333;
   --accent: #f59e0b; --accent-dim: #d97706; --text: #e5e5e5; --muted: #8a8a8a;
   --danger: #ef4444; --success: #22c55e; --savings: #3b82f6; --cc: #f59e0b;
-  --bucket-blue: #60a5fa; --bucket-amber: #fbbf24; --bucket-green: #4ade80; --bucket-pink: #f472b6; --bucket-gray: #9ca3af;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="amber-light"] {
   --bg: #faf9f6; --surface: #ffffff; --surface2: #f0ede8; --border: #d6d0c6;
   --accent: #b45309; --accent-dim: #92400e; --text: #1c1917; --muted: #78716c;
   --danger: #dc2626; --success: #16a34a; --savings: #2563eb; --cc: #b45309;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 
 /* ── Deep Ocean ── */
@@ -252,11 +316,11 @@
   --bg: #0b1222; --surface: #111d32; --surface2: #17253e; --border: #233552;
   --accent: #38bdf8; --accent-dim: #0ea5e9; --text: #cbd5e1; --muted: #7c8fa4;
   --danger: #f87171; --success: #4ade80; --savings: #38bdf8; --cc: #fb923c;
-  --bucket-blue: #60a5fa; --bucket-amber: #fbbf24; --bucket-green: #4ade80; --bucket-pink: #f472b6; --bucket-gray: #9ca3af;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #9ca3af; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }
 [data-theme="ocean-light"] {
   --bg: #f0f7ff; --surface: #ffffff; --surface2: #e8f0fc; --border: #bfcfe0;
   --accent: #0284c7; --accent-dim: #0369a1; --text: #0c1929; --muted: #5b7491;
   --danger: #dc2626; --success: #15803d; --savings: #0284c7; --cc: #c2410c;
-  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280;
+  --bucket-blue: #2563eb; --bucket-amber: #b45309; --bucket-green: #16a34a; --bucket-pink: #db2777; --bucket-gray: #6b7280; --bucket-teal: #0d9488; --bucket-violet: #7c3aed;
 }

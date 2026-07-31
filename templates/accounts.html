@@ -64,6 +64,13 @@
     }
     .add-btn:hover { background: var(--accent-dim); }
 
+    .acct-group-label {
+      font-family: var(--font-display); font-weight: 600; font-size: 0.75rem;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 1px;
+      margin: 20px 0 8px;
+    }
+    .acct-group-label:first-child { margin-top: 0; }
+
     /* Account card */
     .acct-card {
       background: var(--surface);
@@ -105,8 +112,8 @@
     }
     .acct-badge.savings { background: rgba(88,166,255,0.1); color: var(--savings); }
     .acct-badge.cc { background: rgba(210,153,34,0.1); color: var(--cc); }
-    .acct-badge.investment { background: rgba(88,166,255,0.1); color: var(--accent); }
-    .acct-dot.investment { background: var(--accent); }
+    .acct-badge.investment { background: rgba(167,139,250,0.12); color: var(--bucket-violet); }
+    .acct-dot.investment { background: var(--bucket-violet); }
 
     .acct-balance {
       font-size: 0.75rem;
@@ -114,15 +121,8 @@
       margin-top: 4px;
     }
 
+    /* Base .action-btn look/size is shared in themes.css (manage.html + accounts.html) */
     .acct-actions { display: flex; gap: 4px; flex-shrink: 0; }
-    .action-btn {
-      background: none; border: 1px solid var(--border); border-radius: 6px;
-      color: var(--muted); font-size: 0.7rem; width: 28px; height: 28px;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      transition: all 0.15s; padding: 0;
-    }
-    .action-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .action-btn.del:hover { border-color: var(--danger); color: var(--danger); }
 
     /* Empty state */
     .empty {
@@ -305,7 +305,12 @@
   {% else %}
 
   <div id="acct-list">
+    {% set group_ns = namespace(type='') %}
     {% for acct in accounts %}
+      {% if acct.type != group_ns.type %}
+        {% set group_ns.type = acct.type %}
+        <div class="acct-group-label">{{ {'savings': 'Savings', 'credit': 'Credit Cards', 'investment': 'Investments'}.get(acct.type, acct.type) }}</div>
+      {% endif %}
       {% set ns = namespace(bal=None) %}
       {% for b in balances %}
         {% if b.id == acct.id %}
@@ -334,8 +339,8 @@
           </div>
         </div>
         <div class="acct-actions">
-          <button class="action-btn" onclick="openEditModal(this.dataset)" data-acct='{{ acct|tojson|e }}' title="Edit">&#9998;</button>
-          <button class="action-btn del" onclick="confirmDelete({{ acct.id }}, {{ acct.name|tojson }})" title="Delete">&#10005;</button>
+          <button class="action-btn" onclick="openEditModal(this.dataset)" data-acct='{{ acct|tojson|e }}' title="Edit" aria-label="Edit {{ acct.name }}">&#9998;</button>
+          <button class="action-btn del" onclick="confirmDelete({{ acct.id }}, {{ acct.name|tojson }})" title="Delete" aria-label="Delete {{ acct.name }}">&#10005;</button>
         </div>
       </div>
     {% endfor %}
@@ -353,6 +358,12 @@
     <div class="form-group">
       <label for="acct-name">Account Name</label>
       <input type="text" id="acct-name" placeholder="e.g. HDFC Savings" required autocomplete="off">
+    </div>
+
+    <div class="form-group" id="acct-type-locked-note" style="display:none">
+      <label>Type</label>
+      <div style="font-size:0.8rem; color:var(--muted); padding:11px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius);" id="acct-type-locked-value"></div>
+      <div style="font-size:0.72rem; color:var(--muted); margin-top:6px;">Account type can't be changed after creation — delete and re-add if you need a different type.</div>
     </div>
 
     <div class="form-group" id="acct-type-group">
@@ -517,6 +528,7 @@
     document.getElementById('acct-compounding').value = 'quarterly';
     document.getElementById('inv-subtype-market').checked = true;
     document.getElementById('acct-type-group').style.display = 'block';
+    document.getElementById('acct-type-locked-note').style.display = 'none';
     document.getElementById('inv-subtype-group').style.display = 'none';
     updateTypeFields('savings', 'market');
     document.getElementById('acct-save-btn').textContent = 'Save Account';
@@ -532,8 +544,11 @@
     document.getElementById('acct-name').value = acct.name;
     document.getElementById('acct-save-btn').textContent = 'Save Changes';
 
-    // Hide type toggle in edit mode (type cannot change)
+    // Hide type toggle in edit mode (type cannot change) — show a locked read-only note instead
     document.getElementById('acct-type-group').style.display = 'none';
+    document.getElementById('acct-type-locked-note').style.display = 'block';
+    const typeLabels = { savings: 'Savings', credit: 'Credit', investment: 'Investment' };
+    document.getElementById('acct-type-locked-value').textContent = typeLabels[acct.type] || acct.type;
 
     const subtype = acct.subtype || 'market';
 

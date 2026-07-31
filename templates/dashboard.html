@@ -72,6 +72,19 @@
     .stat-value { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; }
     .stat-sub { font-size: 0.65rem; color: var(--muted); margin-top: 3px; }
 
+    /* Net worth hero — deliberately heavier than a .stat-card (accent border,
+       larger value) so it reads as the page's one headline number, not just
+       another tile in a row of six. */
+    .net-worth-hero {
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      margin-bottom: 24px;
+    }
+    .net-worth-hero #net-worth { font-size: 2.2rem; }
+    @media (max-width: 480px) { .net-worth-hero #net-worth { font-size: 1.7rem; } }
+
     /* Two-column chart grid on desktop */
     .charts-grid {
       display: grid;
@@ -115,7 +128,7 @@
     }
     .acct-bal-dot.savings { background: var(--savings); }
     .acct-bal-dot.credit { background: var(--cc); }
-    .acct-bal-dot.investment { background: var(--accent); }
+    .acct-bal-dot.investment { background: var(--bucket-violet); }
     .acct-bal-info { flex: 1; }
     .acct-bal-name { font-size: 0.8rem; font-weight: 500; margin-bottom: 2px; }
     .acct-bal-detail { font-size: 0.65rem; color: var(--muted); }
@@ -240,6 +253,33 @@
     <button class="date-range-apply" id="date-range-apply">Apply</button>
   </div>
 
+  <!-- Net worth — the headline number a personal finance dashboard exists to
+       answer. Was previously below account balances + billing cycle, styled
+       almost identically to every other stat card (just a bigger font size),
+       so it never read as "the answer." Moved to the top and given its own
+       visual weight (accent border, larger value) so it's the first real
+       number a user sees, before the more granular period-spending stats. -->
+  <div class="net-worth-hero">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <div class="stat-label">NET WORTH</div>
+        <div class="stat-value" id="net-worth">Calculating...</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="stat-label">NEXT MILESTONE</div>
+        <div class="stat-value" id="nw-milestone" style="font-size: 1.2rem; color:var(--muted)">—</div>
+      </div>
+    </div>
+    <div style="background:var(--border); border-radius:8px; height:12px; overflow:hidden; margin-top:8px;">
+      <div id="nw-progress-bar" style="height:100%; border-radius:8px; transition:width 0.8s ease; width:0%; background:var(--accent);"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; margin-top:4px; font-size:0.7rem; color:var(--muted);">
+      <span id="nw-progress-label">0%</span>
+      <span id="nw-remaining-label">—</span>
+    </div>
+    <div id="nw-breakdown" style="margin-top:16px;"></div>
+  </div>
+
   <!-- Stat cards -->
   <div class="stats-row" id="stats-row">
     <div class="stat-card">
@@ -313,28 +353,6 @@
     </div>
   </div>
 
-  <!-- Net worth with goal -->
-  <div class="stat-card" style="margin-bottom: 24px; padding: 20px 24px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-      <div>
-        <div class="stat-label">NET WORTH</div>
-        <div class="stat-value" id="net-worth" style="font-size: 1.8rem;">Calculating...</div>
-      </div>
-      <div style="text-align:right;">
-        <div class="stat-label">NEXT MILESTONE</div>
-        <div class="stat-value" id="nw-milestone" style="font-size: 1.2rem; color:var(--muted)">—</div>
-      </div>
-    </div>
-    <div style="background:var(--border); border-radius:8px; height:12px; overflow:hidden; margin-top:8px;">
-      <div id="nw-progress-bar" style="height:100%; border-radius:8px; transition:width 0.8s ease; width:0%; background:var(--accent);"></div>
-    </div>
-    <div style="display:flex; justify-content:space-between; margin-top:4px; font-size:0.7rem; color:var(--muted);">
-      <span id="nw-progress-label">0%</span>
-      <span id="nw-remaining-label">—</span>
-    </div>
-    <div id="nw-breakdown" style="margin-top:16px;"></div>
-  </div>
-
   <!-- Charts (two-column on desktop) -->
   <div class="charts-grid">
     <div class="chart-card full-width">
@@ -390,9 +408,25 @@
       PIE_TEXT: isDark ? get('--bg') : '#ffffff',
       MONTH_BAR_INACTIVE: get('--surface2'),
       FILL_ALPHA: isDark ? (get('--accent') + '18') : (get('--accent') + '14'),
-      CAT_COLORS: [get('--accent'), get('--success'), get('--cc'), get('--danger'), get('--savings'), get('--muted'),
-                   get('--accent-dim'), get('--success'), get('--cc'), get('--danger')],
+      // Dedicated categorical set — never borrows --success/--danger/--cc, since
+      // those are reserved status colors (a red category bar would misread as
+      // "over budget", a green one as "income"). Same fixed hues the Plan page
+      // uses for buckets, validated (dataviz skill's validate_palette.js) against
+      // every theme's dark AND light surface — no --accent-dim filler slot, since
+      // that varies per theme and isn't part of the validated set.
+      CAT_COLORS: [get('--bucket-blue'), get('--bucket-amber'), get('--bucket-green'), get('--bucket-pink'),
+                   get('--bucket-violet'), get('--bucket-teal')],
     };
+  }
+
+  // Deterministic color-by-name so a category/account/merchant keeps the same
+  // color across re-renders and filter changes, instead of a color tied to its
+  // current sort rank (which would repaint survivors whenever the ranking shifts).
+  function stableColor(name, colors) {
+    let hash = 0;
+    const s = String(name);
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    return colors[hash % colors.length];
   }
 
   const plotLayout = (overrides = {}) => {
@@ -506,6 +540,30 @@
 
   // ── Render account balance cards ──
   const escHTML = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+
+  // ── Accessible table fallback for a chart ──
+  // Plotly's SVG/canvas output has no screen-reader-usable content. Renders a
+  // native <details> disclosure (keyboard + screen-reader friendly with zero
+  // extra JS toggle logic) right after the chart with the same data as a table.
+  // Idempotent across re-renders (filter change, auto-refresh, theme switch) —
+  // updates the existing table in place instead of stacking duplicates.
+  function renderChartTable(afterElId, tableId, headers, rows) {
+    const bodyHtml = `<table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;">
+        <thead><tr>${headers.map(h => `<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;">${escHTML(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r => `<tr>${r.map(c => `<td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escHTML(String(c))}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>`;
+    let details = document.getElementById(tableId);
+    if (details) {
+      details.querySelector('.chart-table-body').innerHTML = bodyHtml;
+      return;
+    }
+    const afterEl = document.getElementById(afterElId);
+    if (!afterEl) return;
+    details = document.createElement('details');
+    details.id = tableId;
+    details.innerHTML = `<summary style="cursor:pointer;font-size:0.72rem;color:var(--muted);margin-top:8px;">View as table</summary><div class="chart-table-body">${bodyHtml}</div>`;
+    afterEl.insertAdjacentElement('afterend', details);
+  }
 
   function renderAccountBalances() {
     const container = document.getElementById('acct-balances');
@@ -887,6 +945,7 @@
       fillcolor: c.FILL_ALPHA,
       hovertemplate: '<b>%{x}</b><br>₹%{y:,.0f}<br><i>Click to view transactions</i><extra></extra>',
     }], plotLayout({ margin: { t: 10, b: 50, l: 60, r: 10 } }), { ...plotConfig, staticPlot: false });
+    renderChartTable('chart-daily', 'chart-daily-table', ['Date', 'Spent'], dailyDates.map(d => [d, fmt(daily[d])]));
 
     // Click handler for daily chart points
     const dailyChart = document.getElementById('chart-daily');
@@ -935,18 +994,20 @@
       x: catEntries.map(e => e[1]),
       y: catEntries.map(e => e[0]),
       type: 'bar', orientation: 'h',
-      marker: { color: catEntries.map((_, i) => c.CAT_COLORS[i % c.CAT_COLORS.length]) },
+      marker: { color: catEntries.map(e => stableColor(e[0], c.CAT_COLORS)) },
       hovertemplate: '<b>%{y}</b><br>₹%{x:,.0f}<extra></extra>',
     }], plotLayout({
       margin: { t: 10, b: 30, l: 130, r: 20 },
       xaxis: { gridcolor: c.GRID_COLOR },
       yaxis: { automargin: true },
     }), plotConfig);
+    renderChartTable('chart-category', 'chart-category-table', ['Category', 'Spent'], catEntries.map(e => [e[0], fmt(e[1])]));
 
-    // Account donut
+    // Account donut — colored per account name (not just per type), so two
+    // accounts of the same type don't share an indistinguishable legend swatch.
     const accLabels = Object.keys(byAcc);
     const accValues = accLabels.map(k => byAcc[k]);
-    const accColors = accLabels.map(k => accountTypeMap[k] === 'savings' ? c.SAVINGS_COLOR : c.CC_COLOR);
+    const accColors = accLabels.map(k => stableColor(k, c.CAT_COLORS));
     Plotly.react('chart-account', [{
       labels: accLabels,
       values: accValues,
@@ -962,6 +1023,7 @@
       legend: { font: { color: c.FONT_COLOR, size: 11 }, orientation: 'h', y: -0.1 },
       showlegend: true,
     }, plotConfig);
+    renderChartTable('chart-account', 'chart-account-table', ['Account', 'Spent'], accLabels.map((k, i) => [k, fmt(accValues[i])]));
 
     // Month over month
     const monthly = rawSummary.monthly || {};
@@ -972,6 +1034,7 @@
       marker: { color: months.map((m, i) => i === months.length - 1 ? c.ACCENT : c.MONTH_BAR_INACTIVE) },
       hovertemplate: '<b>%{x}</b><br>₹%{y:,.0f}<extra></extra>',
     }], plotLayout({ margin: { t: 10, b: 50, l: 70, r: 10 } }), plotConfig);
+    renderChartTable('chart-monthly', 'chart-monthly-table', ['Month', 'Total'], months.map((m, i) => [m, fmt(monthTotals[i])]));
   }
 
   // ── Filter pills ──

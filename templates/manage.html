@@ -533,24 +533,8 @@
     .txn-card.expanded .expand-icon { transform: rotate(180deg); }
 
     /* ── Action buttons ── */
+    /* Base .action-btn look/size is shared in themes.css (manage.html + accounts.html) */
     .txn-actions { display: flex; gap: 4px; flex-shrink: 0; }
-    .action-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--muted);
-      font-size: 0.7rem;
-      width: 28px;
-      height: 28px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.15s;
-      padding: 0;
-    }
-    .action-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .action-btn.del:hover { border-color: var(--danger); color: var(--danger); }
     .action-btn.track { font-size: 0.85rem; }
     .action-btn.track.tracked { color: var(--success); border-color: var(--success); }
     .action-btn.track.untracked { color: var(--muted); border-color: var(--border); opacity: 0.5; }
@@ -676,24 +660,10 @@
     .toggle-btn.income input:checked + label { border-color: var(--success); color: var(--success); background: rgba(63,185,80,0.08); }
     .toggle-btn.transfer input:checked + label { border-color: var(--muted); color: var(--muted); background: rgba(139,148,158,0.08); }
 
-    /* ── Toast ── */
-    .toast {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%) translateY(80px);
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 50px;
-      padding: 12px 20px;
-      font-size: 0.85rem;
-      z-index: 200;
-      transition: transform 0.3s ease;
-      white-space: nowrap;
-    }
-    .toast.show { transform: translateX(-50%) translateY(0); }
-    .toast.success { border-color: var(--success); color: var(--success); }
-    .toast.error { border-color: var(--danger); color: var(--danger); }
+    /* Toast markup/styling is shared via interactions.js's ensureToastContainer()
+       — this page used to define its own diverging shape (50px pill vs the
+       12px radius everywhere else), so the same notification looked different
+       depending which page triggered it. Removed to match the rest of the app. */
 
     /* ── Theme overrides ── */
     select option { background: var(--surface); }
@@ -835,7 +805,9 @@
 
         {% if plan_buckets %}
         <div class="form-group" id="plan-bucket-group" style="display:none">
-          <label for="plan_bucket">Plan Bucket <span style="color:var(--muted)">(optional)</span></label>
+          <label for="plan_bucket">Plan Bucket <span style="color:var(--muted)">(optional)</span>
+            <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Tags this contribution for the Plan vs. Actual page. Auto-selects when the account is linked to a bucket in Settings — override or clear it if this transaction shouldn't count. Doesn't affect balances, dashboard, or analytics either way.">?</span>
+          </label>
           <select id="plan_bucket">
             <option value="">None</option>
             {% for b in plan_buckets %}
@@ -981,9 +953,9 @@
             <div class="txn-date">{{ txn.date[8:] }}/{{ txn.date[5:7] }}</div>
           </div>
           <div class="txn-actions" onclick="event.stopPropagation()">
-            <button class="action-btn track {{ 'tracked' if txn.track else 'untracked' }}" onclick="toggleTrack({{ txn.id }}, {{ 'true' if txn.track else 'false' }})" title="{{ 'Tracked in dashboard' if txn.track else 'Not tracked in dashboard' }}">&#9673;</button>
-            <button class="action-btn" onclick="openEditModal({{ txn.id }})" title="Edit">&#9998;</button>
-            <button class="action-btn del" onclick="confirmDelete({{ txn.id }}, false)" title="Delete">&#10005;</button>
+            <button class="action-btn track {{ 'tracked' if txn.track else 'untracked' }}" onclick="toggleTrack({{ txn.id }}, {{ 'true' if txn.track else 'false' }})" title="{{ 'Tracked in dashboard' if txn.track else 'Not tracked in dashboard' }}" aria-label="{{ 'Tracked in dashboard' if txn.track else 'Not tracked in dashboard' }} — toggle">&#9673;</button>
+            <button class="action-btn" onclick="openEditModal({{ txn.id }})" title="Edit" aria-label="Edit {{ txn.description }}">&#9998;</button>
+            <button class="action-btn del" onclick="confirmDelete({{ txn.id }}, false)" title="Delete" aria-label="Delete {{ txn.description }}">&#10005;</button>
           </div>
           {% set sub_count = children.get(txn.id, [])|length %}
           <span class="expand-icon">▾ {% if sub_count > 0 %}({{ sub_count }}){% endif %}</span>
@@ -999,8 +971,8 @@
             </div>
             <div class="sub-item-amount">₹{{ "%.2f"|format(sub.amount) }}</div>
             <div class="txn-actions">
-              <button class="action-btn" onclick="openEditModal({{ sub.id }})" title="Edit">&#9998;</button>
-              <button class="action-btn del" onclick="confirmDelete({{ sub.id }}, true)" title="Delete">&#10005;</button>
+              <button class="action-btn" onclick="openEditModal({{ sub.id }})" title="Edit" aria-label="Edit {{ sub.description }}">&#9998;</button>
+              <button class="action-btn del" onclick="confirmDelete({{ sub.id }}, true)" title="Delete" aria-label="Delete {{ sub.description }}">&#10005;</button>
             </div>
           </div>
           {% endfor %}
@@ -1100,7 +1072,9 @@
 
     {% if plan_buckets %}
     <div class="form-group" id="edit-plan-bucket-group" style="display:none">
-      <label for="edit-plan-bucket">Plan Bucket <span style="color:var(--muted)">(optional)</span></label>
+      <label for="edit-plan-bucket">Plan Bucket <span style="color:var(--muted)">(optional)</span>
+        <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Tags this contribution for the Plan vs. Actual page. Doesn't affect balances, dashboard, or analytics either way.">?</span>
+      </label>
       <select id="edit-plan-bucket">
         <option value="">None</option>
         {% for b in plan_buckets %}
@@ -1199,8 +1173,6 @@
     </div>
   </div>
 </div>
-
-<div class="toast" id="toast"></div>
 
 <script>
   const categories = {{ categories | tojson }};
@@ -1487,9 +1459,9 @@
                   <div class="txn-date">${esc(dateParts[2])}/${esc(dateParts[1])}</div>
                 </div>
                 <div class="txn-actions" onclick="event.stopPropagation()">
-                  <button class="action-btn track tracked" onclick="toggleTrack(${parseInt(data.id)}, true)" title="Tracked in dashboard">&#9673;</button>
-                  <button class="action-btn" onclick="openEditModal(${parseInt(data.id)})" title="Edit">&#9998;</button>
-                  <button class="action-btn del" onclick="confirmDelete(${parseInt(data.id)}, false)" title="Delete">&#10005;</button>
+                  <button class="action-btn track tracked" onclick="toggleTrack(${parseInt(data.id)}, true)" title="Tracked in dashboard" aria-label="Tracked in dashboard — toggle">&#9673;</button>
+                  <button class="action-btn" onclick="openEditModal(${parseInt(data.id)})" title="Edit" aria-label="Edit ${esc(payload.description)}">&#9998;</button>
+                  <button class="action-btn del" onclick="confirmDelete(${parseInt(data.id)}, false)" title="Delete" aria-label="Delete ${esc(payload.description)}">&#10005;</button>
                 </div>
                 <span class="expand-icon">▾</span>
               </div>

@@ -129,14 +129,18 @@
   </div>
   {% else %}
 
-  {% if fun_fund_balance is not none %}
   <div class="stats-row">
+    <div class="stat-card" id="trajectory-headline-card" style="display:none">
+      <div class="stat-label" id="trajectory-headline-label">Ahead of plan</div>
+      <div class="stat-value" id="trajectory-headline-value">₹0</div>
+    </div>
+    {% if fun_fund_balance is not none %}
     <div class="stat-card">
       <div class="stat-label">Guilt-Free Balance ({{ fun_fund_bucket.label }})</div>
-      <div class="stat-value">₹{{ '%.2f'|format(fun_fund_balance) }}</div>
+      <div class="stat-value" id="fun-fund-balance">—</div>
     </div>
+    {% endif %}
   </div>
-  {% endif %}
 
   <div class="section-label">This Month
     <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Live progress for the current calendar month — updates as soon as you tag a transaction, no waiting for the month to end.">?</span>
@@ -156,7 +160,7 @@
   </div>
 
   <div class="section-label">Trajectory
-    <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Green line: your real net worth history. Dotted line: what it would be if every monthly target was hit exactly. Only shows completed months — the current month isn't projected until it's over.">?</span>
+    <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Solid line: your real net worth history. Dotted line: what it would be if every monthly target was hit exactly. The stat above compares the two for the latest month you have data for. Only shows completed months — the current month isn't projected until it's over.">?</span>
   </div>
   <div class="card chart-card">
     <div class="chart-title">Actual vs. Projected Net Worth</div>
@@ -176,12 +180,33 @@
   const cumActual = {{ cum_actual|tojson }};
   const projected = {{ projected|tojson }};   // [[month_key, value], ...]
   const actualSeries = {{ actual_series|tojson }}; // [[month_key, value], ...]
+  const funFundBalance = {{ fun_fund_balance|tojson }};
 
   function fmt(n) {
     return '₹' + Math.round(n).toLocaleString('en-IN');
   }
 
   function esc(s) { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+
+  // Accessible table fallback for the trajectory chart (see dashboard.html for
+  // the same helper — Plotly's SVG output has no screen-reader-usable content).
+  function renderChartTable(afterElId, tableId, headers, rows) {
+    const bodyHtml = `<table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;">
+        <thead><tr>${headers.map(h => `<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;">${esc(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r => `<tr>${r.map(c => `<td style="padding:4px 8px;border-bottom:1px solid var(--border);">${esc(String(c))}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>`;
+    let details = document.getElementById(tableId);
+    if (details) {
+      details.querySelector('.chart-table-body').innerHTML = bodyHtml;
+      return;
+    }
+    const afterEl = document.getElementById(afterElId);
+    if (!afterEl) return;
+    details = document.createElement('details');
+    details.id = tableId;
+    details.innerHTML = `<summary style="cursor:pointer;font-size:0.72rem;color:var(--muted);margin-top:8px;">View as table</summary><div class="chart-table-body">${bodyHtml}</div>`;
+    afterEl.insertAdjacentElement('afterend', details);
+  }
 
   function bucketColor(c) {
     const style = getComputedStyle(document.documentElement);
@@ -193,8 +218,12 @@
     card.innerHTML = buckets.map(b => {
       const target = thisTarget[b.id] || 0;
       const actual = thisActual[b.id] || 0;
+      const met = target > 0 && actual >= target;
       const pct = target > 0 ? Math.min(100, (actual / target) * 100) : (actual > 0 ? 100 : 0);
       const color = bucketColor(b.color);
+      const statusText = met
+        ? '&#10003; Target met'
+        : `${Math.round(pct)}% of this month's ${esc(b.label.toLowerCase())} target reached`;
       return `
         <div class="bucket-row">
           <div class="bucket-head">
@@ -202,25 +231,61 @@
             <div class="bucket-amounts">${fmt(actual)} / ${fmt(target)}</div>
           </div>
           <div class="bucket-track"><div class="bucket-fill" style="width:${pct}%;background:${color};"></div></div>
-          <div class="bucket-pct">${Math.round(pct)}% of this month's ${esc(b.label.toLowerCase())} target reached</div>
+          <div class="bucket-pct" style="${met ? 'color:var(--success);font-weight:600;' : ''}">${statusText}</div>
         </div>`;
     }).join('');
   }
 
   function renderCumulative() {
     const table = document.getElementById('cum-table');
-    let html = '<thead><tr><th>Bucket</th><th>Target</th><th>Actual</th></tr></thead><tbody>';
+    // Δ (actual − target) is the one place on this page --success/--danger correctly
+    // mean "good/bad" — an ahead-of-target bucket vs. a lagging one — rather than
+    // just labeling a series, which is what the trajectory line used to do.
+    let html = '<thead><tr><th>Bucket</th><th>Target</th><th>Actual</th><th>Δ</th></tr></thead><tbody>';
+    let totalDelta = 0;
     buckets.forEach(b => {
       const color = bucketColor(b.color);
+      const target = cumTarget[b.id] || 0;
+      const actual = cumActual[b.id] || 0;
+      const delta = actual - target;
+      totalDelta += delta;
+      const deltaColor = delta >= 0 ? 'var(--success)' : 'var(--danger)';
       html += `<tr>
         <td><span class="swatch" style="background:${color}"></span>${esc(b.label)}</td>
-        <td>${fmt(cumTarget[b.id] || 0)}</td>
-        <td>${fmt(cumActual[b.id] || 0)}</td>
+        <td>${fmt(target)}</td>
+        <td>${fmt(actual)}</td>
+        <td style="color:${deltaColor}">${delta >= 0 ? '+' : ''}${fmt(delta)}</td>
       </tr>`;
     });
-    html += `<tr><td>Total</td><td>${fmt(cumTarget._total || 0)}</td><td>${fmt(cumActual._total || 0)}</td></tr>`;
+    const grandDelta = (cumActual._total || 0) - (cumTarget._total || 0);
+    const grandDeltaColor = grandDelta >= 0 ? 'var(--success)' : 'var(--danger)';
+    html += `<tr><td>Total</td><td>${fmt(cumTarget._total || 0)}</td><td>${fmt(cumActual._total || 0)}</td><td style="color:${grandDeltaColor}">${grandDelta >= 0 ? '+' : ''}${fmt(grandDelta)}</td></tr>`;
     html += '</tbody>';
     table.innerHTML = html;
+  }
+
+  function renderFunFundBalance() {
+    const el = document.getElementById('fun-fund-balance');
+    if (el && funFundBalance !== null) el.textContent = fmt(funFundBalance);
+  }
+
+  // The single headline this whole page exists to answer: am I ahead of or
+  // behind my own plan, right now? Matched on the latest month both series
+  // actually share, since actualSeries (from networth_history.json) can start
+  // later than projected (which covers every completed month since plan start).
+  function renderHeadline() {
+    const cardEl = document.getElementById('trajectory-headline-card');
+    if (!actualSeries.length || !projected.length) { cardEl.style.display = 'none'; return; }
+    const [lastMonth, actualVal] = actualSeries[actualSeries.length - 1];
+    const projMatch = projected.find(p => p[0] === lastMonth);
+    if (!projMatch) { cardEl.style.display = 'none'; return; }
+    const diff = actualVal - projMatch[1];
+    const ahead = diff >= 0;
+    cardEl.style.display = '';
+    document.getElementById('trajectory-headline-label').textContent = `${ahead ? 'Ahead of' : 'Behind'} plan as of ${lastMonth}`;
+    const valueEl = document.getElementById('trajectory-headline-value');
+    valueEl.textContent = (ahead ? '+' : '-') + fmt(Math.abs(diff));
+    valueEl.style.color = ahead ? 'var(--success)' : 'var(--danger)';
   }
 
   // ── Plotly theme (shared pattern from dashboard/analytics) ──
@@ -234,6 +299,7 @@
       GRID_COLOR: get('--border'),
       ACCENT: get('--accent'),
       SUCCESS: get('--success'),
+      NEUTRAL: get('--bucket-gray'),
     };
   }
 
@@ -266,21 +332,32 @@
       });
     }
     if (actualSeries.length) {
+      // Neutral color deliberately — this is "what happened," not a verdict.
+      // --success/--danger are reserved for the ahead/behind headline stat and
+      // the cumulative-table Δ column, so a losing trajectory doesn't render
+      // in the same green that means "good" everywhere else in the app.
       traces.push({
         x: actualSeries.map(p => p[0]), y: actualSeries.map(p => p[1]),
         type: 'scatter', mode: 'lines+markers', name: 'Actual',
-        line: { color: c.SUCCESS, width: 2.5 }, marker: { size: 6 },
+        line: { color: c.NEUTRAL, width: 2.5 }, marker: { size: 6 },
         hovertemplate: '%{x}<br>Actual: ₹%{y:,.0f}<extra></extra>',
       });
     }
     if (traces.length) {
       Plotly.react('chart-trajectory', traces, plotLayout(), plotConfig);
+      const monthKeys = [...new Set([...projected.map(p => p[0]), ...actualSeries.map(p => p[0])])].sort();
+      const projByMonth = Object.fromEntries(projected);
+      const actualByMonth = Object.fromEntries(actualSeries);
+      renderChartTable('chart-trajectory', 'chart-trajectory-table', ['Month', 'Actual', 'Projected'],
+        monthKeys.map(m => [m, m in actualByMonth ? fmt(actualByMonth[m]) : '—', m in projByMonth ? fmt(projByMonth[m]) : '—']));
     } else {
       document.getElementById('chart-trajectory').innerHTML = '<div style="color:var(--muted);font-size:0.8rem;text-align:center;padding:40px 0;">Not enough history yet — check back after a few months.</div>';
     }
   }
 
   function renderAll() {
+    renderFunFundBalance();
+    renderHeadline();
     renderThisMonth();
     renderCumulative();
     renderTrajectory();

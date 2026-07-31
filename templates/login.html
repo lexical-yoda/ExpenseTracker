@@ -119,6 +119,23 @@
       margin-bottom: 16px;
       text-align: center;
     }
+
+    .login-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    .login-reset-hint {
+      text-align: center;
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 20px;
+      line-height: 1.5;
+    }
+    .login-reset-hint code {
+      font-family: var(--font-mono);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
   </style>
 </head>
 <body>
@@ -145,10 +162,19 @@
       <input type="password" id="password" name="password" required autocomplete="current-password">
     </div>
 
-    <button type="submit" class="login-btn">Sign In</button>
+    <button type="submit" class="login-btn" id="login-btn">Sign In</button>
   </form>
+
+  <div class="login-reset-hint">Forgot your password? Run <code>python scripts/reset_password.py</code> on the server.</div>
 </div>
 
+<script>
+  document.querySelector('form').addEventListener('submit', function() {
+    const btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+  });
+</script>
 <script src="/static/theme.js"></script>
 <script>initThemePicker();</script>
 </body>

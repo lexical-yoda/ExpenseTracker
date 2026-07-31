@@ -166,6 +166,7 @@
     }
     .submit-btn:hover { background: var(--accent-dim); transform: translateY(-1px); }
     .submit-btn:active { transform: translateY(0); }
+    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
     .error-msg {
       background: rgba(248, 113, 113, 0.08);
@@ -203,12 +204,14 @@
 
     <div class="form-group">
       <label for="password">Password</label>
-      <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="Min 6 characters">
+      <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="Min 6 characters" minlength="6">
+      <div style="font-size:0.72rem; color:var(--muted); margin-top:4px">You can reset this later from the server with <code style="font-family:var(--font-mono); background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:1px 5px;">python scripts/reset_password.py</code> — this setup page itself won't run again once you finish.</div>
     </div>
 
     <div class="form-group">
       <label for="confirm_password">Confirm Password</label>
-      <input type="password" id="confirm_password" name="confirm_password" required autocomplete="new-password">
+      <input type="password" id="confirm_password" name="confirm_password" required autocomplete="new-password" minlength="6">
+      <div id="confirm-mismatch" style="font-size:0.72rem; color:var(--danger); margin-top:4px; display:none;">Passwords don't match</div>
     </div>
 
     <hr class="divider">
@@ -417,6 +420,29 @@
     document.getElementById('accounts-list').appendChild(entry);
   });
 
+  // Live password-match check — server still validates on submit, this just
+  // catches the mistake before the user loses time filling out the account list.
+  function checkPasswordMatch() {
+    const pw = document.getElementById('password').value;
+    const confirm = document.getElementById('confirm_password').value;
+    const mismatchEl = document.getElementById('confirm-mismatch');
+    const mismatch = confirm.length > 0 && pw !== confirm;
+    mismatchEl.style.display = mismatch ? 'block' : 'none';
+    return !mismatch;
+  }
+  document.getElementById('password').addEventListener('input', checkPasswordMatch);
+  document.getElementById('confirm_password').addEventListener('input', checkPasswordMatch);
+
+  document.getElementById('setup-form').addEventListener('submit', function(e) {
+    if (!checkPasswordMatch()) {
+      e.preventDefault();
+      document.getElementById('confirm_password').focus();
+      return;
+    }
+    const btn = document.querySelector('.submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Setting up…';
+  });
 </script>
 <script src="/static/theme.js"></script>
 <script>initThemePicker();</script>

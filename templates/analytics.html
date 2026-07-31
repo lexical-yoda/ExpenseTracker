@@ -147,6 +147,7 @@
   <div class="page-header">
     <div class="page-title">Analytics</div>
     <div class="filter-row" id="filter-row">
+      <button class="filter-pill" data-filter="month">This Month</button>
       <button class="filter-pill active" data-filter="3months">3 Months</button>
       <button class="filter-pill" data-filter="6months">6 Months</button>
       <button class="filter-pill" data-filter="ytd">Year to Date</button>
@@ -191,7 +192,7 @@
   <!-- Charts -->
   <div class="charts-grid">
     <div class="chart-card full-width">
-      <div class="chart-title">Category Trends (Last 6 Months)</div>
+      <div class="chart-title">Category Trends (Last 6 Months — always, ignores filter above)</div>
       <div class="chart-wrap" id="chart-cat-trends" style="height:300px"></div>
     </div>
 
@@ -231,10 +232,26 @@
       CC_COLOR: get('--cc'),
       SUCCESS: get('--success'),
       DANGER: get('--danger'),
+      MUTED: get('--muted'),
       FILL_ALPHA: isDark ? (get('--accent') + '18') : (get('--accent') + '14'),
-      CAT_COLORS: [get('--accent'), get('--success'), get('--cc'), get('--danger'), get('--savings'),
-                   get('--muted'), get('--accent-dim'), get('--success'), get('--cc'), get('--danger')],
+      // Dedicated categorical set — never borrows --success/--danger/--cc, since
+      // those are reserved status colors. Same fixed hues the Plan page uses for
+      // buckets, validated (dataviz skill's validate_palette.js) against every
+      // theme's dark AND light surface — no --accent-dim filler slot, since that
+      // varies per theme and isn't part of the validated set.
+      CAT_COLORS: [get('--bucket-blue'), get('--bucket-amber'), get('--bucket-green'), get('--bucket-pink'),
+                   get('--bucket-violet'), get('--bucket-teal')],
     };
+  }
+
+  // Deterministic color-by-name so a category/merchant keeps the same color
+  // across re-renders and filter changes, instead of a color tied to its
+  // current sort rank (which would repaint survivors whenever ranking shifts).
+  function stableColor(name, colors) {
+    let hash = 0;
+    const s = String(name);
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    return colors[hash % colors.length];
   }
 
   const plotLayout = (overrides = {}) => {
@@ -255,6 +272,33 @@
 
   function fmt(n) {
     return '₹' + Math.round(n).toLocaleString('en-IN');
+  }
+
+  const escHTML = s => { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; };
+
+  // ── Accessible table fallback for a chart (see dashboard.html for the same
+  // helper — Plotly's SVG/canvas output has no screen-reader-usable content).
+  // Idempotent across re-renders (filter pills, theme switch).
+  function renderChartTable(afterElId, tableId, headers, rows) {
+    const bodyHtml = `<table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;">
+        <thead><tr>${headers.map(h => `<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;">${escHTML(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r => `<tr>${r.map(c => `<td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escHTML(String(c))}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>`;
+    let details = document.getElementById(tableId);
+    if (details) {
+      details.querySelector('.chart-table-body').innerHTML = bodyHtml;
+      return;
+    }
+    const afterEl = document.getElementById(afterElId);
+    if (!afterEl) return;
+    details = document.createElement('details');
+    details.id = tableId;
+    details.innerHTML = `<summary style="cursor:pointer;font-size:0.72rem;color:var(--muted);margin-top:8px;">View as table</summary><div class="chart-table-body">${bodyHtml}</div>`;
+    afterEl.insertAdjacentElement('afterend', details);
+  }
+
+  function removeChartTable(tableId) {
+    document.getElementById(tableId)?.remove();
   }
 
   // ── Helpers ──
@@ -301,7 +345,9 @@
 
   function getFilterRange(filter) {
     const now = new Date();
-    if (filter === '3months') {
+    if (filter === 'month') {
+      return { start: toYMD(new Date(now.getFullYear(), now.getMonth(), 1)), end: toYMD(now) };
+    } else if (filter === '3months') {
       return { start: toYMD(new Date(now.getFullYear(), now.getMonth() - 2, 1)), end: toYMD(now) };
     } else if (filter === '6months') {
       return { start: toYMD(new Date(now.getFullYear(), now.getMonth() - 5, 1)), end: toYMD(now) };
@@ -374,10 +420,13 @@
       months.push({ key: toYMD(d).slice(0, 7), label: d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) });
     }
 
-    // Group by month+category
+    // Group by month+category — deliberately uses allTxns, not the filter-pill-scoped
+    // txns, since this chart's 6-month window is fixed and independent of the filter
+    // above (see chart title). Using the filtered set here would silently intersect a
+    // narrow Custom range with this window, showing near-empty months that look broken.
     const catMonthly = {};
     const catTotals = {};
-    txns.forEach(t => {
+    allTxns.forEach(t => {
       const mk = t.date.slice(0, 7);
       if (!months.some(m => m.key === mk)) return;
       const cat = t.category || 'Other';
@@ -393,7 +442,7 @@
       y: months.map(m => (catMonthly[cat] || {})[m.key] || 0),
       type: 'scatter', mode: 'lines+markers',
       name: cat,
-      line: { color: c.CAT_COLORS[i % c.CAT_COLORS.length], width: 2 },
+      line: { color: stableColor(cat, c.CAT_COLORS), width: 2 },
       marker: { size: 5 },
       hovertemplate: '<b>%{fullData.name}</b><br>%{x}: ₹%{y:,.0f}<extra></extra>',
     }));
@@ -404,8 +453,11 @@
         legend: { font: { color: c.FONT_COLOR, size: 10 }, orientation: 'h', y: -0.2 },
         showlegend: true,
       }), plotConfig);
+      renderChartTable('chart-cat-trends', 'chart-cat-trends-table', ['Month', ...topCats],
+        months.map(m => [m.label, ...topCats.map(cat => fmt((catMonthly[cat] || {})[m.key] || 0))]));
     } else {
       document.getElementById('chart-cat-trends').innerHTML = '<div class="chart-empty">Not enough data for trends</div>';
+      removeChartTable('chart-cat-trends-table');
     }
 
     // ═══ Day of Week Pattern ═══
@@ -421,13 +473,19 @@
     const dowAvgs = dowTotals.map((total, i) => dowCounts[i] > 0 ? total / dowCounts[i] : 0);
     const dowLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const maxDow = Math.max(...dowAvgs);
-    const dowColors = dowAvgs.map(v => v === maxDow && maxDow > 0 ? c.ACCENT : c.CAT_COLORS[5]);
+    const dowColors = dowAvgs.map(v => v === maxDow && maxDow > 0 ? c.ACCENT : c.MUTED);
 
-    Plotly.react('chart-dow', [{
-      x: dowLabels, y: dowAvgs, type: 'bar',
-      marker: { color: dowColors },
-      hovertemplate: '<b>%{x}</b><br>Avg: ₹%{y:,.0f}<extra></extra>',
-    }], plotLayout({ margin: { t: 10, b: 40, l: 60, r: 10 } }), plotConfig);
+    if (maxDow > 0) {
+      Plotly.react('chart-dow', [{
+        x: dowLabels, y: dowAvgs, type: 'bar',
+        marker: { color: dowColors },
+        hovertemplate: '<b>%{x}</b><br>Avg: ₹%{y:,.0f}<extra></extra>',
+      }], plotLayout({ margin: { t: 10, b: 40, l: 60, r: 10 } }), plotConfig);
+      renderChartTable('chart-dow', 'chart-dow-table', ['Day', 'Avg Spend'], dowLabels.map((d, i) => [d, fmt(dowAvgs[i])]));
+    } else {
+      document.getElementById('chart-dow').innerHTML = '<div class="chart-empty">No spending in this period</div>';
+      removeChartTable('chart-dow-table');
+    }
 
     // ═══ Merchant Analysis ═══
     const merchants = {};
@@ -446,14 +504,17 @@
         x: topMerchants.map(e => e[1]),
         y: topMerchants.map(e => e[0]),
         type: 'bar', orientation: 'h',
-        marker: { color: topMerchants.map((_, i) => c.CAT_COLORS[i % c.CAT_COLORS.length]) },
+        marker: { color: topMerchants.map(e => stableColor(e[0], c.CAT_COLORS)) },
         hovertemplate: '<b>%{y}</b><br>₹%{x:,.0f}<extra></extra>',
       }], plotLayout({
         margin: { t: 10, b: 30, l: 160, r: 20 },
         yaxis: { automargin: true },
       }), plotConfig);
+      renderChartTable('chart-merchants', 'chart-merchants-table', ['Merchant', 'Total'],
+        [...topMerchants].reverse().map(e => [e[0], fmt(e[1])]));
     } else {
       document.getElementById('chart-merchants').innerHTML = '<div class="chart-empty">No merchant data available</div>';
+      removeChartTable('chart-merchants-table');
     }
 
     // ═══ Spending Velocity ═══
@@ -511,8 +572,15 @@
         legend: { font: { color: c.FONT_COLOR, size: 10 }, orientation: 'h', y: -0.25 },
         showlegend: true,
       }), plotConfig);
+      const velDays = Math.max(thisVel.days.length, lastVel.days.length);
+      const velRows = [];
+      for (let i = 0; i < velDays; i++) {
+        velRows.push([i + 1, i < thisVel.days.length ? fmt(thisVel.cumulative[i]) : '—', i < lastVel.days.length ? fmt(lastVel.cumulative[i]) : '—']);
+      }
+      renderChartTable('chart-velocity', 'chart-velocity-table', ['Day', 'This Month (cumulative)', 'Last Month (cumulative)'], velRows);
     } else {
       document.getElementById('chart-velocity').innerHTML = '<div class="chart-empty">Not enough data for velocity comparison</div>';
+      removeChartTable('chart-velocity-table');
     }
   }
 </script>

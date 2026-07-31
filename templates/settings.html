@@ -155,6 +155,27 @@
       .inline-row { flex-direction: column; }
       .inline-row .field { min-width: 100%; }
     }
+
+    /* Section jump-nav — this page stacks 7 distinct config sections in one
+       scroll (LLM, n8n, mapping, webhook, prompt, plan, history). Doesn't
+       change that structure, but gives Hick's/Miller's Law a visible chunked
+       index instead of relying purely on scroll position + memory. */
+    .section-nav {
+      display: flex; gap: 6px; flex-wrap: wrap;
+      margin-bottom: 20px; padding: 10px 0 14px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 5;
+    }
+    .section-nav a {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 50px;
+      color: var(--muted); font-size: 0.72rem; text-decoration: none;
+      padding: 6px 14px; text-transform: uppercase; letter-spacing: 0.5px;
+      transition: all 0.15s;
+    }
+    .section-nav a:hover { border-color: var(--accent); color: var(--text); }
+    .section-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* So a jump-nav click doesn't land the target section's heading right
+       under the sticky nav bar above. */
+    .section { scroll-margin-top: 60px; }
   </style>
 </head>
 <body>
@@ -176,10 +197,20 @@
 <div class="container">
   <div class="page-title">Settings</div>
 
+  <nav class="section-nav" aria-label="Jump to section">
+    <a href="#sec-llm">LLM</a>
+    <a href="#sec-n8n">n8n</a>
+    <a href="#sec-mapping">Mapping</a>
+    <a href="#sec-webhook">Webhook</a>
+    <a href="#sec-prompt">Prompt</a>
+    <a href="#sec-plan">Plan</a>
+    <a href="#sec-history">History</a>
+  </nav>
+
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <!-- LLM CONFIGURATION                                                      -->
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="section">
+  <div class="section" id="sec-llm">
     <div class="section-title">
       <span class="status-dot {{ 'on' if config.enabled and config.llm_url else 'off' }}"></span>
       LLM Configuration
@@ -203,8 +234,8 @@
     </div>
 
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
-      <button class="btn btn-outline" onclick="testLLM()">Test LLM Connection</button>
+      <button class="btn btn-primary" onclick="saveConfig(this)">Save</button>
+      <button class="btn btn-outline" onclick="testLLM(this)">Test LLM Connection</button>
     </div>
     <div class="test-result" id="llm-test-result"></div>
   </div>
@@ -212,7 +243,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <!-- EMAIL AUTOMATION (n8n)                                                  -->
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="section">
+  <div class="section" id="sec-n8n">
     <div class="section-title">Email Automation (n8n)</div>
     <div class="section-desc">Automatically parse bank transaction emails using <strong>n8n</strong> — a free, self-hosted automation tool that connects your email inbox to this app.</div>
 
@@ -292,7 +323,7 @@ volumes:
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <!-- ACCOUNT MAPPING                                                        -->
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="section">
+  <div class="section" id="sec-mapping">
     <div class="section-title">Account Mapping</div>
     <div class="section-desc">Map identifiers in your bank emails to your Expense Manager accounts.</div>
 
@@ -324,14 +355,14 @@ volumes:
     </table>
     <button class="btn btn-outline" style="margin-top:8px;" onclick="addMappingRow()">+ Add Mapping</button>
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+      <button class="btn btn-primary" onclick="saveConfig(this)">Save</button>
     </div>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <!-- WEBHOOK                                                                 -->
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="section">
+  <div class="section" id="sec-webhook">
     <div class="section-title">Webhook</div>
     <div class="section-desc">Send bank alert emails to this endpoint from external tools (n8n, Mailrise, scripts).</div>
 
@@ -356,7 +387,7 @@ volumes:
       <input type="url" id="cfg-app-url" value="{{ config.app_url or 'http://localhost:5000' }}" placeholder="http://localhost:5000">
     </div>
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+      <button class="btn btn-primary" onclick="saveConfig(this)">Save</button>
     </div>
 
     <!-- Test Webhook (full pipeline test) -->
@@ -365,7 +396,7 @@ volumes:
         <label>Test Full Pipeline — paste a sample bank email</label>
         <textarea id="test-webhook-input" style="min-height:80px;" placeholder="Paste a bank email here to test the full pipeline: API key → HTML parsing → LLM → draft creation..."></textarea>
       </div>
-      <button class="btn btn-success" onclick="testWebhook()">Test Webhook Pipeline</button>
+      <button class="btn btn-success" onclick="testWebhook(this)">Test Webhook Pipeline</button>
       <div class="test-result" id="webhook-test-result"></div>
     </div>
   </div>
@@ -373,7 +404,7 @@ volumes:
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <!-- CUSTOM PROMPT (Advanced)                                                -->
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="section">
+  <div class="section" id="sec-prompt">
     <div class="section-title">Custom Parsing Prompt</div>
     <div class="section-desc">Customize the system prompt sent to the LLM for parsing bank emails.</div>
 
@@ -383,7 +414,7 @@ volumes:
     </div>
 
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+      <button class="btn btn-primary" onclick="saveConfig(this)">Save</button>
       <button class="btn btn-outline" onclick="document.getElementById('cfg-prompt').value=''; showToast('Reset to default');">Reset to Default</button>
     </div>
 
@@ -437,7 +468,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
         <label>Test Parse — paste a sample email</label>
         <textarea id="test-parse-input" style="min-height:80px;" placeholder="Paste a bank email here to test parsing..."></textarea>
       </div>
-      <button class="btn btn-success" onclick="testParse()">Test Parse</button>
+      <button class="btn btn-success" onclick="testParse(this)">Test Parse</button>
       <div class="test-result" id="parse-test-result"></div>
     </div>
   </div>
@@ -445,7 +476,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <!-- INVESTMENT PLAN                                                         -->
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="section">
+  <div class="section" id="sec-plan">
     <div class="section-title">Investment Plan</div>
     <div class="section-desc">Define your monthly allocation plan across buckets. Tag Income or Transfer transactions with a bucket on the Manage page to track progress on the <a href="/plan" style="color:var(--accent);">Plan page</a>. Read-only tracking — no auto-debit, no penalties for skipped months.</div>
 
@@ -548,23 +579,28 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     <div style="font-size:0.75rem; color:var(--muted); margin-top:8px;">Pick "— None —" for a bucket that isn't tied to one account — e.g. an FD top-up bucket, since each FD you book becomes its own new account rather than topping up an existing one. It's still tracked automatically by matching Fixed Deposit accounts booked after your Plan Start Date.</div>
     <button class="btn btn-outline" style="margin-top:8px;" onclick="addPlanBucketRow()">+ Add Bucket</button>
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="savePlanConfig()">Save Plan</button>
+      <button class="btn btn-primary" onclick="savePlanConfig(this)">Save Plan</button>
     </div>
   </div>
 
   <!-- Pipeline History -->
-  <div class="card" style="margin-top:24px;">
-    <h2 style="margin-bottom:12px;">Pipeline History</h2>
+  <!-- Was a bare .card/<h2>/.btn-small — none of those three classes are defined
+       anywhere in this file's stylesheet, so this section silently rendered as
+       an unstyled div with browser-default buttons (no background/border/radius),
+       looking broken next to the other 6 sections. Switched to the real .section
+       / .section-title / .btn-outline tokens the rest of the page already uses. -->
+  <div class="section" id="sec-history" style="margin-top:24px;">
+    <div class="section-title">Pipeline History</div>
     <p style="color:var(--muted); font-size:0.85rem; margin-bottom:12px;">
       Log of all email parsing attempts — webhook and paste. Shows success, failure, skipped, and duplicates.
     </p>
     <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
-      <button class="btn btn-small" onclick="loadPipelineHistory('')" style="font-size:0.8rem;">All</button>
-      <button class="btn btn-small" onclick="loadPipelineHistory('success')" style="font-size:0.8rem;">Success</button>
-      <button class="btn btn-small" onclick="loadPipelineHistory('failed')" style="font-size:0.8rem;">Failed</button>
-      <button class="btn btn-small" onclick="loadPipelineHistory('skipped')" style="font-size:0.8rem;">Skipped</button>
-      <button class="btn btn-small" onclick="loadPipelineHistory('duplicate')" style="font-size:0.8rem;">Duplicate</button>
-      <button class="btn btn-small" onclick="clearPipelineHistory()" style="font-size:0.8rem; margin-left:auto; background:var(--danger); color:#fff;">Clear History</button>
+      <button class="btn btn-outline" onclick="loadPipelineHistory('')" style="font-size:0.8rem;">All</button>
+      <button class="btn btn-outline" onclick="loadPipelineHistory('success')" style="font-size:0.8rem;">Success</button>
+      <button class="btn btn-outline" onclick="loadPipelineHistory('failed')" style="font-size:0.8rem;">Failed</button>
+      <button class="btn btn-outline" onclick="loadPipelineHistory('skipped')" style="font-size:0.8rem;">Skipped</button>
+      <button class="btn btn-outline" onclick="loadPipelineHistory('duplicate')" style="font-size:0.8rem;">Duplicate</button>
+      <button class="btn btn-danger" onclick="clearPipelineHistory()" style="font-size:0.8rem; margin-left:auto;">Clear History</button>
     </div>
     <div id="pipeline-history" style="max-height:400px; overflow-y:auto;">
       <p style="color:var(--muted); text-align:center;">Loading...</p>
@@ -599,7 +635,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     tbody.appendChild(tr);
   }
 
-  async function saveConfig() {
+  async function saveConfig(btn) {
     const activePreset = document.querySelector('.preset-chip.active')?.dataset?.preset || 'custom';
     const body = {
       enabled: document.getElementById('cfg-enabled').checked,
@@ -609,21 +645,31 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
       app_url: document.getElementById('cfg-app-url').value.trim(),
     };
 
-    const resp = await fetch('/api/settings/email', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify(body)
-    });
-    const data = await resp.json();
-    if (data.success) showToast('Settings saved');
-    else showToast(data.error || 'Failed to save', 'error');
+    const orig = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    try {
+      const resp = await fetch('/api/settings/email', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json();
+      if (data.success) showToast('Settings saved');
+      else showToast(data.error || 'Failed to save', 'error');
+    } catch (e) {
+      showToast('Network error', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
   }
 
-  async function testLLM() {
+  async function testLLM(btn) {
     const url = document.getElementById('cfg-llm-url').value.trim();
     const el = document.getElementById('llm-test-result');
     if (!url) { el.className = 'test-result error'; el.textContent = 'Enter a URL first'; return; }
     el.className = 'test-result'; el.style.display = 'block'; el.textContent = 'Testing...';
+    const orig = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing...'; }
     try {
       const resp = await fetch('/api/settings/email/test-llm', {
         method: 'POST',
@@ -636,63 +682,84 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     } catch (e) {
       el.className = 'test-result error';
       el.textContent = 'Failed: ' + e.message;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   }
 
-  async function testWebhook() {
+  async function testWebhook(btn) {
     const html = document.getElementById('test-webhook-input').value.trim();
     const el = document.getElementById('webhook-test-result');
     if (!html) { el.className = 'test-result error'; el.textContent = 'Paste a bank email first'; return; }
     el.className = 'test-result'; el.style.display = 'block'; el.textContent = 'Testing full pipeline...';
+    const orig = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing...'; }
 
-    const resp = await fetch('/api/settings/email/test-webhook', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ html })
-    });
-    const data = await resp.json();
-    if (data.success) {
-      el.className = 'test-result success';
-      el.innerHTML = '<strong>' + esc(data.message) + '</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + esc(JSON.stringify(data.parsed, null, 2)) + '</pre><br><span style="font-size:0.8rem;color:var(--muted);">Draft #' + esc(String(data.draft_id)) + ' created. Check the Manage page to review it.</span>';
-    } else {
+    try {
+      const resp = await fetch('/api/settings/email/test-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ html })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        el.className = 'test-result success';
+        el.innerHTML = '<strong>' + esc(data.message) + '</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + esc(JSON.stringify(data.parsed, null, 2)) + '</pre><br><span style="font-size:0.8rem;color:var(--muted);">Draft #' + esc(String(data.draft_id)) + ' created. Check the Manage page to review it.</span>';
+      } else {
+        el.className = 'test-result error';
+        el.textContent = data.error;
+      }
+    } catch (e) {
       el.className = 'test-result error';
-      el.textContent = data.error;
+      el.textContent = 'Failed: ' + e.message;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   }
 
-  async function testParse() {
+  async function testParse(btn) {
     const text = document.getElementById('test-parse-input').value.trim();
     const el = document.getElementById('parse-test-result');
     if (!text) { el.className = 'test-result error'; el.textContent = 'Paste an email first'; return; }
     el.className = 'test-result'; el.style.display = 'block'; el.textContent = 'Parsing...';
+    const orig = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Parsing...'; }
 
-    const resp = await fetch('/api/settings/email/test-parse', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({
-        text,
-        llm_url: document.getElementById('cfg-llm-url').value.trim(),
-        system_prompt: document.getElementById('cfg-prompt').value.trim(),
-      })
-    });
-    const data = await resp.json();
-    if (data.success) {
-      el.className = 'test-result success';
-      el.innerHTML = '<strong>Parsed successfully:</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + JSON.stringify(data.parsed, null, 2) + '</pre>';
-    } else {
+    try {
+      const resp = await fetch('/api/settings/email/test-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({
+          text,
+          llm_url: document.getElementById('cfg-llm-url').value.trim(),
+          system_prompt: document.getElementById('cfg-prompt').value.trim(),
+        })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        el.className = 'test-result success';
+        el.innerHTML = '<strong>Parsed successfully:</strong><br><pre style="margin-top:8px;white-space:pre-wrap;">' + JSON.stringify(data.parsed, null, 2) + '</pre>';
+      } else {
+        el.className = 'test-result error';
+        el.textContent = data.error;
+      }
+    } catch (e) {
       el.className = 'test-result error';
-      el.textContent = data.error;
+      el.textContent = 'Failed: ' + e.message;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   }
 
   async function regenerateKey() {
+    if (!confirm('Regenerate the API key? The old key stops working immediately — any n8n workflow or webhook script still using it will fail until you update it there too.')) return;
     const resp = await fetch('/api/settings/email/regenerate-key', {
       method: 'POST', headers: { 'X-CSRFToken': csrfToken }
     });
     const data = await resp.json();
     if (data.success) {
       document.getElementById('api-key-display').textContent = data.api_key;
-      showToast('API key regenerated');
+      showToast('API key regenerated — update it in n8n/webhook configs');
     }
   }
 
@@ -733,7 +800,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
           ? `${esc(e.parsed.merchant || '—')} — ₹${(e.parsed.amount||0).toLocaleString('en-IN')} (${esc(e.parsed.date||'—')})`
           : esc(e.error || e.email_preview || '—');
         const retryBtn = e.status === 'failed' && e.email_preview
-          ? `<button class="btn btn-small" onclick="retryPipeline(${parseInt(e.id)||0})" style="font-size:0.75rem;padding:2px 8px;">Retry</button>`
+          ? `<button class="btn btn-outline" onclick="retryPipeline(${parseInt(e.id)||0})" style="font-size:0.75rem;padding:2px 8px;">Retry</button>`
           : (e.draft_id ? `Draft #${parseInt(e.draft_id)||0}` : '—');
         html += `<tr style="border-bottom:1px solid var(--border);">`;
         html += `<td style="padding:6px;white-space:nowrap;">${esc(time)}</td>`;
@@ -802,7 +869,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
     tbody.appendChild(tr);
   }
 
-  async function savePlanConfig() {
+  async function savePlanConfig(btn) {
     const buckets = Array.from(document.querySelectorAll('#plan-bucket-body tr')).map(row => ({
       id: row.querySelector('.pb-id').value.trim(),
       label: row.querySelector('.pb-label').value.trim(),
@@ -824,14 +891,22 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
       buckets,
     };
 
-    const resp = await fetch('/api/settings/plan', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify(body)
-    });
-    const data = await resp.json();
-    if (data.success) showToast('Plan saved');
-    else showToast(data.error || 'Failed to save', 'error');
+    const orig = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    try {
+      const resp = await fetch('/api/settings/plan', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json();
+      if (data.success) showToast('Plan saved');
+      else showToast(data.error || 'Failed to save', 'error');
+    } catch (e) {
+      showToast('Network error', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
   }
 
   // Load history on page load
