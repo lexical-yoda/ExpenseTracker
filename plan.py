@@ -4,6 +4,7 @@ Given plan.json (as a dict) and the transaction list from spreadsheet.py, these
 functions compute per-bucket monthly targets, cumulative targets, and actuals.
 """
 
+import math
 from datetime import date, datetime
 from collections import defaultdict
 
@@ -42,7 +43,6 @@ def phase1_month_count(plan):
     phase1_total = plan.get('phase1_target_total', 0)
     if monthly_base <= 0 or phase1_total <= 0:
         return 0
-    import math
     return math.ceil(phase1_total / monthly_base)
 
 
@@ -238,3 +238,73 @@ def trajectory(plan, as_of_date=None, baseline_networth=0):
         running += sum(monthly_target(plan, offset).values())
         out.append((_month_key(year, month), running))
     return out
+
+
+def _month_key_index(month_key):
+    """'YYYY-MM' -> a single sortable/subtractable integer (year*12 + month)."""
+    y, m = month_key.split('-')
+    return int(y) * 12 + int(m)
+
+
+def average_monthly_growth(actual_series):
+    """Average real net worth change per elapsed calendar month, from the first
+    to the last point in actual_series ([(month_key, value), ...], sorted).
+    Uses the calendar-month gap between the first and last key (not the point
+    count), since networth_history.json has no backfill and can have gaps if
+    the dashboard wasn't opened in a given month. Returns None with fewer than
+    2 points or a zero month gap (can't compute a rate)."""
+    if len(actual_series) < 2:
+        return None
+    first_key, first_val = actual_series[0]
+    last_key, last_val = actual_series[-1]
+    months_elapsed = _month_key_index(last_key) - _month_key_index(first_key)
+    if months_elapsed <= 0:
+        return None
+    return (last_val - first_val) / months_elapsed
+
+
+def linear_eta_month_key(current_value, goal, monthly_growth, as_of_date=None):
+    """Month key (YYYY-MM) by which current_value reaches goal, extrapolating
+    monthly_growth linearly forward from as_of_date (today by default).
+    Returns None if goal/monthly_growth is missing or monthly_growth <= 0 (flat
+    or declining net worth has no ETA — there's nothing honest to project).
+    Returns the current month's key if the goal is already reached."""
+    if goal is None or monthly_growth is None or monthly_growth <= 0:
+        return None
+    as_of = as_of_date or date.today()
+    if current_value >= goal:
+        return _month_key(as_of.year, as_of.month)
+    months_needed = math.ceil((goal - current_value) / monthly_growth)
+    year, month = _add_months(as_of.year, as_of.month, months_needed)
+    return _month_key(year, month)
+
+
+def theoretical_eta_month_key(plan, current_value, goal, as_of_date=None, max_months=1200):
+    """Month key by which current_value reaches goal if every future monthly
+    plan target (monthly_target()) is hit exactly, continuing forward from the
+    month after as_of_date. Returns None if goal is missing, plan has no start
+    date, or the plan's targets sum to <= 0 (can never reach the goal this way
+    — capped at max_months, 100 years, as a safety backstop either way).
+    Returns the current month's key if the goal is already reached."""
+    if goal is None:
+        return None
+    as_of = as_of_date or date.today()
+    if current_value >= goal:
+        return _month_key(as_of.year, as_of.month)
+    if 'plan_start_date' not in plan:
+        return None
+    offsets = elapsed_month_offsets(plan, as_of)
+    offset = (offsets[-1] + 1) if offsets else 0
+    running = current_value
+    months = 0
+    while running < goal and months < max_months:
+        target_sum = sum(monthly_target(plan, offset).values())
+        if target_sum <= 0:
+            return None
+        running += target_sum
+        offset += 1
+        months += 1
+    if running < goal:
+        return None
+    year, month = _add_months(as_of.year, as_of.month, months)
+    return _month_key(year, month)

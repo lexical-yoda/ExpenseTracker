@@ -207,3 +207,55 @@ def test_transfer_without_destination_does_not_count():
     ]
     actual = plan.cumulative_actual(txns, SAMPLE_PLAN, date(2026, 10, 5))
     assert actual == {'_total': 0}
+
+
+def test_average_monthly_growth_needs_two_points():
+    assert plan.average_monthly_growth([]) is None
+    assert plan.average_monthly_growth([('2026-08', 100000)]) is None
+
+
+def test_average_monthly_growth_uses_calendar_gap_not_point_count():
+    # 3 data points but a gap (no Oct snapshot) — gap is Aug->Dec = 4 months,
+    # not 2 (point count - 1), so growth-per-month should be spread over 4.
+    series = [('2026-08', 100000), ('2026-09', 120000), ('2026-12', 180000)]
+    assert plan.average_monthly_growth(series) == (180000 - 100000) / 4
+
+
+def test_linear_eta_no_growth_means_no_eta():
+    assert plan.linear_eta_month_key(500000, 10000000, None) is None
+    assert plan.linear_eta_month_key(500000, 10000000, 0) is None
+    assert plan.linear_eta_month_key(500000, 10000000, -1000) is None
+
+
+def test_linear_eta_already_reached():
+    assert plan.linear_eta_month_key(10000000, 10000000, 50000, date(2026, 8, 15)) == '2026-08'
+    assert plan.linear_eta_month_key(12000000, 10000000, 50000, date(2026, 8, 15)) == '2026-08'
+
+
+def test_linear_eta_projects_forward():
+    # Need 9,500,000 more at 100,000/month -> ceil(95) = 95 months from Aug 2026.
+    eta = plan.linear_eta_month_key(500000, 10000000, 100000, date(2026, 8, 15))
+    assert eta == '2034-07'  # Aug 2026 + 95 months
+
+
+def test_theoretical_eta_already_reached():
+    assert plan.theoretical_eta_month_key(SAMPLE_PLAN, 10000000, 10000000, date(2026, 8, 15)) == '2026-08'
+
+
+def test_theoretical_eta_no_goal_or_no_plan_start():
+    assert plan.theoretical_eta_month_key(SAMPLE_PLAN, 500000, None, date(2026, 8, 15)) is None
+    assert plan.theoretical_eta_month_key({}, 500000, 10000000, date(2026, 8, 15)) is None
+
+
+def test_theoretical_eta_zero_target_never_reaches():
+    zero_plan = dict(SAMPLE_PLAN, buckets=[], phase1_target_total=0, monthly_base=0, base_income=0, base_expense=0)
+    assert plan.theoretical_eta_month_key(zero_plan, 500000, 10000000, date(2026, 10, 5), max_months=12) is None
+
+
+def test_theoretical_eta_projects_forward_from_next_month():
+    # As of Oct 5 2026: offsets elapsed are [0,1,2] (Aug/Sep/Oct), so projection
+    # starts at offset 3 (Nov). Phase 1 (2 months) is already done by then.
+    eta = plan.theoretical_eta_month_key(SAMPLE_PLAN, 9950000, 10000000, date(2026, 10, 5))
+    # Post-phase-1 monthly target total with no extra = 60000+15000+15000+30000+10000 = 130000
+    # Needs 50000 more -> 1 month -> Nov 2026.
+    assert eta == '2026-11'

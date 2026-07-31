@@ -129,6 +129,32 @@
   </div>
   {% else %}
 
+  {% if main_goal_amount %}
+  <div class="section-label">Main Goal
+    <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Your long-term net worth target, set in Settings → Investment Plan. Two ETAs below: one from your actual savings pace (real net worth history), one from this plan's own monthly targets — they'll often disagree, and that's the point.">?</span>
+  </div>
+  <div class="card" id="main-goal-card" style="margin-bottom:20px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <div class="stat-label">NET WORTH</div>
+        <div class="stat-value" id="goal-current" style="font-size:1.6rem;">—</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="stat-label">GOAL</div>
+        <div class="stat-value" id="goal-target" style="font-size:1.2rem; color:var(--muted)">₹0</div>
+      </div>
+    </div>
+    <div style="background:var(--border); border-radius:8px; height:12px; overflow:hidden; margin-top:8px;">
+      <div id="goal-progress-bar" style="height:100%; border-radius:8px; transition:width 0.8s ease; width:0%; background:var(--accent);"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; margin-top:4px; font-size:0.7rem; color:var(--muted);">
+      <span id="goal-progress-label">0%</span>
+      <span id="goal-remaining-label">—</span>
+    </div>
+    <div id="goal-eta-rows" style="margin-top:12px;"></div>
+  </div>
+  {% endif %}
+
   <div class="stats-row">
     <div class="stat-card" id="trajectory-headline-card" style="display:none">
       <div class="stat-label" id="trajectory-headline-label">Ahead of plan</div>
@@ -181,6 +207,11 @@
   const projected = {{ projected|tojson }};   // [[month_key, value], ...]
   const actualSeries = {{ actual_series|tojson }}; // [[month_key, value], ...]
   const funFundBalance = {{ fun_fund_balance|tojson }};
+  const mainGoalAmount = {{ main_goal_amount|tojson }};
+  const currentNetWorth = {{ current_net_worth|tojson }};
+  const avgMonthlyGrowth = {{ avg_monthly_growth|tojson }};
+  const actualEta = {{ actual_eta|tojson }};       // 'YYYY-MM' or null
+  const theoreticalEta = {{ theoretical_eta|tojson }}; // 'YYYY-MM' or null
 
   function fmt(n) {
     return '₹' + Math.round(n).toLocaleString('en-IN');
@@ -267,6 +298,76 @@
   function renderFunFundBalance() {
     const el = document.getElementById('fun-fund-balance');
     if (el && funFundBalance !== null) el.textContent = fmt(funFundBalance);
+  }
+
+  function monthKeyToLabel(key) {
+    const [y, m] = key.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+  }
+
+  function monthsBetweenKeys(fromKey, toKey) {
+    const [fy, fm] = fromKey.split('-').map(Number);
+    const [ty, tm] = toKey.split('-').map(Number);
+    return (ty - fy) * 12 + (tm - fm);
+  }
+
+  function todayMonthKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  // Main Goal card — hidden entirely (no DOM to fill) when main_goal_amount
+  // isn't configured. current_net_worth is the latest monthly snapshot from
+  // networth_history.json (same source the trajectory chart uses), not a live
+  // recompute — updates once/month on dashboard load, same cadence as everywhere
+  // else "net worth" appears outside the Dashboard's own live hero card.
+  function renderMainGoal() {
+    const card = document.getElementById('main-goal-card');
+    if (!card || mainGoalAmount === null) return;
+
+    const reached = currentNetWorth >= mainGoalAmount;
+    const pct = Math.max(0, Math.min(100, (currentNetWorth / mainGoalAmount) * 100));
+
+    document.getElementById('goal-current').textContent = fmt(currentNetWorth);
+    document.getElementById('goal-current').style.color = reached ? 'var(--success)' : 'var(--text)';
+    document.getElementById('goal-target').textContent = fmt(mainGoalAmount);
+    document.getElementById('goal-progress-bar').style.width = pct + '%';
+    document.getElementById('goal-progress-bar').style.background = reached ? 'var(--success)' : 'var(--accent)';
+    document.getElementById('goal-progress-label').textContent = Math.round(pct) + '%';
+    document.getElementById('goal-remaining-label').textContent = reached ? 'Goal reached!' : fmt(mainGoalAmount - currentNetWorth) + ' to go';
+
+    const rows = [];
+    if (reached) {
+      rows.push(['🎉 Goal reached', '']);
+    } else {
+      if (actualEta) {
+        const months = monthsBetweenKeys(todayMonthKey(), actualEta);
+        rows.push([
+          `At your actual pace (${fmt(avgMonthlyGrowth)}/mo)`,
+          `${monthKeyToLabel(actualEta)} · ~${months} month${months === 1 ? '' : 's'}`,
+        ]);
+      } else if (avgMonthlyGrowth !== null && avgMonthlyGrowth <= 0) {
+        rows.push(['At your actual pace', 'Not on track — net worth is flat or declining']);
+      } else {
+        rows.push(['At your actual pace', 'Not enough history yet — check back after a few months']);
+      }
+
+      if (theoreticalEta) {
+        const months = monthsBetweenKeys(todayMonthKey(), theoreticalEta);
+        rows.push([
+          'If every plan target is hit',
+          `${monthKeyToLabel(theoreticalEta)} · ~${months} month${months === 1 ? '' : 's'}`,
+        ]);
+      } else {
+        rows.push(['If every plan target is hit', "This plan's targets don't add up to progress toward this goal"]);
+      }
+    }
+
+    document.getElementById('goal-eta-rows').innerHTML = rows.map(([label, value]) => `
+      <div style="display:flex; justify-content:space-between; gap:12px; font-size:0.8rem; padding:8px 0; border-top:1px solid var(--border);">
+        <span style="color:var(--muted);">${esc(label)}</span>
+        <span style="font-weight:600; text-align:right;">${esc(value)}</span>
+      </div>`).join('');
   }
 
   // The single headline this whole page exists to answer: am I ahead of or
@@ -357,6 +458,7 @@
 
   function renderAll() {
     renderFunFundBalance();
+    renderMainGoal();
     renderHeadline();
     renderThisMonth();
     renderCumulative();

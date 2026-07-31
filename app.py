@@ -618,6 +618,18 @@ def plan_page():
     projected = plan_lib.trajectory(plan_config, today, baseline_networth=baseline)
     actual_series = sorted((k, v) for k, v in history.items() if k >= plan_start_key)
 
+    # Main goal (e.g. "reach ₹1 Cr net worth") — uses the FULL net worth
+    # history, not the plan-start-scoped actual_series above, since a user's
+    # net worth history (and the goal itself) predates and outlives any one
+    # plan configuration. Falls back to a live compute_net_worth() when there's
+    # no snapshot history yet at all, so a brand-new setup isn't just blank.
+    main_goal = plan_config.get('main_goal_amount')
+    full_actual_series = sorted(history.items())
+    current_net_worth = full_actual_series[-1][1] if full_actual_series else compute_net_worth()
+    avg_monthly_growth = plan_lib.average_monthly_growth(full_actual_series)
+    actual_eta = plan_lib.linear_eta_month_key(current_net_worth, main_goal, avg_monthly_growth, today)
+    theoretical_eta = plan_lib.theoretical_eta_month_key(plan_config, current_net_worth, main_goal, today)
+
     fun_fund_balance = None
     fun_fund_bucket = next((b for b in plan_config['buckets'] if b['id'] == 'fun_fund'), None)
     if fun_fund_bucket and fun_fund_bucket.get('account_id') is not None:
@@ -639,6 +651,11 @@ def plan_page():
         actual_series=actual_series,
         fun_fund_balance=fun_fund_balance,
         fun_fund_bucket=fun_fund_bucket,
+        main_goal_amount=main_goal,
+        current_net_worth=current_net_worth,
+        avg_monthly_growth=avg_monthly_growth,
+        actual_eta=actual_eta,
+        theoretical_eta=theoretical_eta,
     )
 
 
@@ -1620,6 +1637,7 @@ def get_default_plan():
         'expense_growth_pct': 0,
         'extra_routing': 'same_ratio',
         'no_penalty_mode': True,
+        'main_goal_amount': None,
     }
 
 
@@ -1806,6 +1824,7 @@ def api_update_plan_config():
             'expense_growth_pct': float(data.get('expense_growth_pct', 0)),
             'extra_routing': data.get('extra_routing') if data.get('extra_routing') in ('same_ratio', 'savings_only') else 'same_ratio',
             'no_penalty_mode': bool(data.get('no_penalty_mode', True)),
+            'main_goal_amount': float(data['main_goal_amount']) if data.get('main_goal_amount') not in (None, '', 'null', 0) else None,
         }
     except (ValueError, TypeError) as e:
         return jsonify({'success': False, 'error': f'Invalid field value: {e}'}), 400

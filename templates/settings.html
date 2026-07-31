@@ -541,6 +541,13 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
       </label>
     </div>
 
+    <div class="field" style="margin-top:16px;">
+      <label>Main Goal — Target Net Worth
+        <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="A single long-term net worth target (e.g. ₹1,00,00,000). The Plan page shows progress toward it plus two ETAs: one based on your actual savings pace, one based on this plan's targets. Leave blank to hide it.">?</span>
+      </label>
+      <input type="number" id="plan-main-goal" value="{{ plan_config.main_goal_amount or '' }}" step="0.01" placeholder="e.g. 10000000 for ₹1 Cr">
+    </div>
+
     <div class="section-desc" style="margin-top:16px;">Buckets
       <span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="Each row is one allocation bucket. Linking a bucket to an Account makes the Plan Bucket dropdown on Manage auto-select it when you tag a transaction to that account.">?</span>
     </div>
@@ -888,6 +895,7 @@ The prompt should instruct the LLM to return ONLY a JSON object, no explanation 
       expense_growth_pct: parseFloat(document.getElementById('plan-expense-growth').value) || 0,
       extra_routing: document.getElementById('plan-extra-routing').value,
       no_penalty_mode: document.getElementById('plan-no-penalty').checked,
+      main_goal_amount: document.getElementById('plan-main-goal').value ? parseFloat(document.getElementById('plan-main-goal').value) : null,
       buckets,
     };
 
