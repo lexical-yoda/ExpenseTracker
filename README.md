@@ -57,7 +57,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | **Investments** | ETF/stock tracking with live Yahoo Finance prices, P&L, and auto-unit updates on purchase |
 | **Fixed deposits** | Compound interest calculation with maturity countdown |
 | **Net worth** | Savings + investments - CC debt, with configurable milestone goals and progress bar |
-| **Plan vs. Actual** | Define a monthly bucket allocation plan, tag contributions, and track target vs. actual — read-only, no auto-debit, no penalties for skipped months |
+| **Plan vs. Actual** | Define a monthly bucket allocation plan, tag contributions, and track target vs. actual — read-only, no auto-debit, no penalties for skipped months. Headline "₹X ahead/behind plan" stat, per-bucket target-met state, and a Δ column on the cumulative table |
 
 ### Quality of Life
 
@@ -74,6 +74,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | **Mobile-first** | Responsive layout, no theme flash, pull-to-refresh |
 | **Contextual help** | "?" icons next to non-obvious fields and workflows explain what they do, in place |
 | **Getting-started banner** | Dismissible checklist on the dashboard for first-time users, gone once you've logged a transaction |
+| **Accessible & responsive** | Keyboard focus rings on every custom control (incl. hidden-radio toggles), `aria-label`s on icon-only buttons, a "View as table" fallback under every chart for screen readers, larger touch targets on mobile, and no more iOS zoom-on-focus |
 
 ### Security
 
@@ -169,9 +170,10 @@ A read-only progress view for a monthly allocation plan (e.g. "₹60k to equity,
 3. Untagged transactions are unaffected everywhere else in the app (dashboard, analytics, net worth) — tagging is purely additive.
 
 ### `/plan` Page
-- **This month** — a progress bar per bucket (actual vs. target for the current calendar month)
-- **Since plan start** — cumulative target vs. actual per bucket, plus "contributed in N of M months" (a completed month only counts once it's actually over — a brand-new plan starts at zero, not a phantom month's worth of "already due")
-- **Trajectory** — actual net worth (from monthly snapshots) vs. a theoretical "if every target was hit" projection, so you can see at a glance whether you're ahead of or behind your own plan
+- **Ahead/behind plan** — a headline stat comparing your latest real net worth snapshot against what the plan projected for that same month, so the page states the answer instead of making you eyeball two chart lines
+- **This month** — a progress bar per bucket (actual vs. target for the current calendar month), with a distinct "✓ Target met" state once a bucket hits its goal
+- **Since plan start** — cumulative target vs. actual per bucket plus a Δ (delta) column, and "contributed in N of M months" (a completed month only counts once it's actually over — a brand-new plan starts at zero, not a phantom month's worth of "already due")
+- **Trajectory** — actual net worth (from monthly snapshots, neutral-colored — it's a fact, not a verdict) vs. a theoretical "if every target was hit" projection (dotted); a "View as table" toggle underneath gives the same data as text
 
 ### Notes
 - A one-time Phase 1 (e.g. building an emergency fund) can have its own bucket split, separate from the steady-state monthly ratios
@@ -321,7 +323,8 @@ To start completely fresh, delete the `data/` folder and restart — the setup w
 - Investment prices from Yahoo Finance are cached for 5 minutes (~15min market delay)
 - Categories, accounts, and settings are updated live — no restart needed
 - All operations are logged via `app.logger` — visible in `docker logs expense-manager`
-- Accounts page lists accounts grouped by type (savings, then credit, then investment), alphabetical within each group
+- Accounts page lists accounts grouped by type (savings, then credit, then investment) under visible section headers, alphabetical within each group
+- Chart/category colors are validated (colorblind-safe separation, contrast, lightness) the same way across all 7 themes and both light/dark modes — not eyeballed per theme
 
 ---
 

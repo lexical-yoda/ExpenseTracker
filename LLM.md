@@ -354,12 +354,15 @@ All templates are standalone HTML files (no base template / inheritance). Each i
 **CSS variable contract** — every palette defines:
 ```
 --bg, --surface, --surface2, --border, --accent, --accent-dim,
---text, --muted, --danger, --success, --savings, --cc
+--text, --muted, --danger, --success, --savings, --cc,
+--bucket-blue, --bucket-amber, --bucket-green, --bucket-pink, --bucket-gray, --bucket-teal, --bucket-violet
 ```
 
 **Theme picker UI**: Dropdown appears from the sun/moon toggle button. Shows palette list with colored dots + dark/light mode toggle. On login/setup pages (no nav), the toggle uses `theme-toggle-fixed` class for fixed positioning.
 
 **Adding a new theme**: Add two CSS blocks to `themes.css` (`[data-theme="name-dark"]` and `[data-theme="name-light"]`) and one entry to the `THEMES` array in `theme.js`. No template changes needed.
+
+**Categorical color set (`--bucket-*`)**: Used for two things — Plan page bucket swatches (`plan.html`'s `bucketColor()`) and chart categorical series (Dashboard/Analytics `CAT_COLORS`, assigned by a stable name-hash — `stableColor(name, colors)` — never by sort rank, so a category/account/merchant keeps the same color across re-renders instead of repainting when the ranking shifts). All 6 hues (`blue/amber/green/pink/teal/violet`; `gray` is a separate neutral, not part of the categorical rotation) use the **same hex values in both light and dark mode** — validated against every theme's own surface color in both modes (OKLCH lightness band, chroma floor, CVD/colorblind separation, contrast). The dark blocks previously used brighter Tailwind-400-style tints (e.g. `#60a5fa`) that looked fine individually but failed the dark-mode lightness band as a set — don't "brighten for dark mode" if you touch these; the mid-tone values are already correct for both. `--success`/`--danger`/`--cc` are reserved status colors and must never be reused as generic categorical/series colors (a red spending category would misread as "over budget"; see `plan.html`'s trajectory chart below for a case where this was fixed).
 
 ### UI Patterns
 
@@ -371,20 +374,26 @@ All templates are standalone HTML files (no base template / inheritance). Each i
 - **Amount display**: Expenses prefixed with `-`, income with `+` and success color
 - **Help tooltips**: `<span class="help-icon" tabindex="0" role="button" aria-label="Help" data-help="...">?</span>` — self-initializing via a single delegated click listener in `interactions.js` (no per-page init call). Click toggles a `.help-popover` anchored above the icon; click elsewhere or Escape closes it. **Must call `e.preventDefault()` on the click** when the icon is inside a `<label for="...">` (common, since most usages sit right after a field label) — otherwise the browser's native label-click-forwarding fires a second synthetic click on the associated form control, which bubbles back to the same delegated listener and immediately closes the popover that was just opened. This is already handled in the shared handler; don't reimplement help icons with a per-element listener that skips it.
 - **Getting-started banner** (`dashboard.html`): same dismiss-and-remember pattern as `email-setup-banner` — `localStorage` flag + conditional server-side render. Shown when `has_activity` is `False` (i.e. `get_all_transactions()` is empty), gone permanently once dismissed or once any transaction exists.
+- **Icon action buttons** (`.action-btn` — edit/delete/track in `manage.html`, edit/delete in `accounts.html`): base look and size live in `themes.css`, not duplicated per template (was 28×28px in both files independently; now one shared rule at 32px, 38px on mobile via the existing `@media (max-width: 600px)` block). Always pair with an `aria-label` describing the specific target (e.g. `aria-label="Delete {{ txn.description }}"`), not just a bare `title` — icon-only buttons have nothing else for a screen reader to announce.
+- **Focus-visible**: custom buttons/pills (`.action-btn`, `.filter-action-btn`, `.filter-pill`, `.filter-select`, `.theme-toggle`) get an explicit `outline: 2px solid var(--accent)` on `:focus-visible` in `themes.css`, since their `:hover`-only styling left keyboard users with either an inconsistent browser default or nothing. Hidden-radio toggles (`input[type=radio]` sized to `opacity:0; width:0` behind a `<label>` — the Type picker pattern in `manage.html`) get the same treatment via `input[type="radio"]:focus-visible + label` — without it, tabbing through them showed zero visual focus indicator at all.
+- **Chart table fallback** (`renderChartTable(afterElId, tableId, headers, rows)` — defined locally in `dashboard.html`, `analytics.html`, `plan.html`): every Plotly chart gets a native `<details><summary>View as table</summary>...</details>` injected right after its `chart-wrap` div, built from the same data passed to `Plotly.react`. Plotly's SVG/canvas output has no screen-reader-usable content otherwise. The function is idempotent — call it again on every re-render (filter change, auto-refresh, theme switch) and it updates the existing table in place instead of stacking duplicates; call `removeChartTable(tableId)` (analytics.html only) when a chart's empty-state branch runs instead. All cell text goes through a local `escHTML`/`esc` helper, not raw interpolation.
 
 ### Dashboard (`/dashboard` — home page)
 
 Two-column chart grid on desktop (> 900px), single column on mobile. Container max-width 1400px.
 
+**Net worth hero** (`.net-worth-hero`, right after the date-range row, before the stat grid): net worth, next milestone, progress bar, and category breakdown. Deliberately styled heavier than a `.stat-card` (accent border, 2.2rem value vs. 1.2rem) and positioned first — it used to sit below account balances and the CC billing cycle section, styled almost identically to every other stat card, so it never read as the page's headline number.
+
 **Stat cards** (6): Total Spent, Total Income, Net (green/red), Transactions count, Avg/Day, Spent Today
 
-**Account balance cards**: One card per account showing name, type, current balance or remaining credit
+**Account balance cards**: One card per account showing name, type, current balance or remaining credit. Investment accounts use `--bucket-violet` for their dot/badge (not `--accent` — in the GitHub, Nord, and Ocean palettes `--savings` equals `--accent`, so Investment and Savings accounts used to render as the exact same color).
 
-**Charts** (Plotly, all with zoom/pan disabled via `fixedrange: true` and `dragmode: false`):
+**Charts** (Plotly, all with zoom/pan disabled via `fixedrange: true` and `dragmode: false`; each has a "View as table" fallback below it — see Chart table fallback in UI Patterns):
 1. **Daily Spending** (full width): Line chart with fill
-2. **By Category**: Horizontal bar chart
-3. **By Account**: Donut chart, colors by account type
-4. **Month over Month**: Bar chart, current month highlighted
+2. **Cumulative Average Spending/Day** (full width): no table fallback — same underlying daily data as #1, deliberately not duplicated
+3. **By Category**: Horizontal bar chart, colored by category name (stable hash, not sort rank)
+4. **By Account**: Donut chart, colored per account name (not just account type — two accounts of the same type used to share one indistinguishable legend swatch)
+5. **Month over Month**: Bar chart, current month highlighted
 
 **Recent Transactions**: Last 8 transactions in the selected period
 
@@ -396,17 +405,17 @@ Chart colors are derived from CSS variables via `getThemeColors()` — works aut
 
 ### Analytics (`/analytics`)
 
-Period filter pills: 3 Months (default), 6 Months, Year to Date, All Time, Custom (date range picker). All computation is client-side from `rawSummary` data.
+Period filter pills: This Month, 3 Months (default), 6 Months, Year to Date, All Time, Custom (date range picker). "This Month" was added to match Dashboard's filter vocabulary — the two pages previously offered different option sets for what's conceptually the same control. All computation is client-side from `rawSummary` data.
 
 **Period Summary cards** (4): This Week, This Month, Last Month, Daily Avg — each with percentage comparison to previous period (green = less spending, red = more).
 
-**Charts** (Plotly):
-1. **Category Trends** (full width): Line chart showing top 5 spending categories over the last 6 months
-2. **Day of Week Spending**: Bar chart showing average spending per weekday (Mon–Sun), highest day highlighted
-3. **Top 10 Merchants**: Horizontal bar chart grouped by transaction description
+**Charts** (Plotly, each with a "View as table" fallback — see UI Patterns):
+1. **Category Trends** (full width, title says "always, ignores filter above"): Line chart, top 5 spending categories over the trailing 6 real calendar months — deliberately independent of the filter pills (built from `allTxns`, not the filter-scoped `txns`), so a narrow Custom range doesn't silently intersect with this window and show near-empty months
+2. **Day of Week Spending**: Bar chart, average spending per weekday (Mon–Sun), highest day highlighted; shows a `.chart-empty` message when there's no spending in the selected period (previously just rendered 7 flat zero bars with no explanation)
+3. **Top 10 Merchants**: Horizontal bar chart grouped by transaction description, colored by merchant name (stable hash)
 4. **Spending Velocity** (full width): Cumulative spend this month vs last month — shows if spending is faster or slower
 
-Period Summary and Spending Velocity always use absolute current/last month data regardless of filter selection. Category Trends, Day of Week, and Merchant Analysis respond to the selected filter range.
+Period Summary and Spending Velocity always use absolute current/last month data regardless of filter selection. Day of Week and Merchant Analysis respond to the selected filter range; Category Trends does not (see above).
 
 ---
 
@@ -492,6 +501,10 @@ In-memory stack (`UNDO_STACK` in app.py, max 20 entries). Before deleting a tran
 ### Advanced filters (Manage page)
 
 Client-side filtering using `data-` attributes on transaction cards (`data-account`, `data-type`, `data-cat`, `data-date`). The `applyFilters()` function reads all filter inputs and hides/shows cards and day/month labels accordingly. Filters also apply to CSV export via query params.
+
+### Mobile input font-size / iOS Safari zoom
+
+Every form's `input`/`select`/`textarea` is sized at 14–15px on desktop for visual density (set per-template — there's no shared form-field component). iOS Safari auto-zooms the whole page on focusing any text input rendered below 16px, which made every form in the app zoom in on tap on iPhone. Fixed once, globally, in `themes.css`'s existing `@media (max-width: 600px)` block: `input, select, textarea { font-size: 16px !important; }`. The `!important` is load-bearing — each template's own `<style>` block comes after `themes.css` in `<head>`, so without it the page's own 14–15px rule would win the cascade at equal specificity. Desktop sizing is untouched (media query only applies ≤600px).
 
 ---
 
@@ -675,7 +688,9 @@ Every email parsing attempt is logged in `data/pipeline_log.json`:
 - `POST /api/pipeline/retry/<log_id>` — retry a failed entry using the stored full email text (re-sends to LLM, creates draft on success)
 - `POST /api/pipeline/clear` — clear all history
 
-**UI:** Settings page has a "Pipeline History" section with filter buttons, status badges, retry buttons, and clear history.
+**UI:** Settings page has a "Pipeline History" section with filter buttons, status badges, retry buttons, and clear history. Uses `.section`/`.section-title`/`.btn-outline`/`.btn-danger` like every other Settings section — it used to be a bare `.card`/`<h2>`/`.btn-small`, none of which are defined anywhere in `settings.html`'s stylesheet, so it silently rendered unstyled (no background/border, browser-default buttons) next to the other 6 properly-styled sections. Status badges already carry the status text (`SUCCESS`/`FAILED`/etc.), not color alone.
+
+**Settings page navigation:** `settings.html` stacks 7 config sections (LLM, n8n, Account Mapping, Webhook, Custom Prompt, Investment Plan, Pipeline History) in one scroll. A sticky `.section-nav` jump-bar sits above them (`<a href="#sec-llm">`, etc.) — each `.section` has a matching `id="sec-*"` and `scroll-margin-top` so a jump doesn't land the heading under the sticky bar. Adding an 8th section: add both the `<a href="#sec-x">` link and the target `id="sec-x"`.
 
 **Limits:** capped at 500 entries (oldest pruned automatically).
 
@@ -786,6 +801,15 @@ Dashboard load → snapshot_networth_if_needed() → networth_history.json (once
 ### `/plan` route pre-existing-plan handling
 
 If `data/plan.json` doesn't exist or has no buckets, `plan_page()` renders `plan.html` with `plan_config=None`, which shows an empty-state pointing to Settings — no crash, no special-casing needed elsewhere.
+
+### `plan.html` client-side rendering (all computed from server-passed `projected`/`actual_series`/etc. — no backend changes)
+
+- **`renderHeadline()`** — the "₹X ahead/behind plan" stat card at the top of the page. Matches on the **latest month `actualSeries` actually has** (`actualSeries[actualSeries.length - 1]`), then looks up `projected`'s value for that *same* month key via `.find()` — not just `projected`'s last index — since `actualSeries` (from `networth_history.json`) can start later or have gaps relative to `projected` (which covers every completed month since plan start). Hidden (`display:none`) if either series is empty or no matching month exists.
+- **Trajectory chart color**: "Actual" line uses `--bucket-gray` (neutral), not `--success`. `--success`/`--danger` are reserved for `renderHeadline()`'s verdict and the cumulative table's Δ column — coloring a plain historical fact green implied "you're winning" even when the line was below the projection.
+- **`renderThisMonth()`** — adds a `met = target > 0 && actual >= target` check; renders "✓ Target met" (styled `--success`, bold) instead of the usual "X% of target reached" text once a bucket hits its goal.
+- **`renderCumulative()`** — the table gained a 4th **Δ** column (`actual − target` per bucket, plus a grand total row), colored `--success`/`--danger` — this is the one other place on the page those tokens are used correctly, as an actual ahead/behind verdict rather than a series label.
+- **`renderFunFundBalance()`** — the "Guilt-Free Balance" stat now renders through the shared `fmt()` (Indian-grouped, no decimals) instead of Jinja's `"%.2f"|format(...)`, matching every other number on this page (was the only amount on `/plan` rendering as `₹45231.00` instead of `₹45,231`).
+- **`renderChartTable()`** on the trajectory chart — see Chart table fallback in the Frontend Architecture → UI Patterns section.
 
 ---
 
