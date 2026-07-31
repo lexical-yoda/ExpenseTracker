@@ -314,7 +314,7 @@ All return JSON. All require `@login_required` and CSRF token for mutations (exc
 | Method | URL | Purpose |
 |--------|-----|---------|
 | GET | `/api/settings/plan` | Get plan config (or the zeroed-out default if none saved yet) |
-| PUT | `/api/settings/plan` | Save plan config. Body: `{plan_start_date, monthly_base, phase1_target_total, base_income, base_expense, income_growth_pct, expense_growth_pct, extra_routing, no_penalty_mode, buckets[], phase1_buckets}`. Each bucket's `ratio` is derived server-side as `amount / monthly_base` — don't send it. `phase1_buckets` is optional in the payload; if omitted, the existing on-disk value is preserved (not wiped) |
+| PUT | `/api/settings/plan` | Save plan config. Body: `{plan_start_date, monthly_base, phase1_target_total, base_income, base_expense, income_growth_pct, expense_growth_pct, extra_routing, no_penalty_mode, main_goal_amount, buckets[], phase1_buckets}`. Each bucket's `ratio` is derived server-side as `amount / monthly_base` — don't send it. `phase1_buckets` is optional in the payload; if omitted, the existing on-disk value is preserved (not wiped). `main_goal_amount` is optional — omit, send `null`, or send `0` to clear it (all three are normalized to `None` server-side) |
 | GET | `/plan` | The Plan vs. Actual page itself (not a JSON API, but listed here since it's the feature's main entry point) |
 
 ### Other
@@ -762,7 +762,8 @@ Dashboard load → snapshot_networth_if_needed() → networth_history.json (once
   "income_growth_pct": 18,
   "expense_growth_pct": 5,
   "extra_routing": "same_ratio",
-  "no_penalty_mode": true
+  "no_penalty_mode": true,
+  "main_goal_amount": 10000000
 }
 ```
 
@@ -771,6 +772,7 @@ Dashboard load → snapshot_networth_if_needed() → networth_history.json (once
 - `phase1_buckets`: optional `{bucket_id: ratio}` split used only during the Phase 1 (emergency-fund) window; falls back to an even split across whichever of `buffer`/`fd_topup` are present (`plan.default_phase1_buckets()`) if omitted
 - `income_growth_pct` / `expense_growth_pct`: applied per completed **plan year** (12-month block from `plan_start_date`), not calendar year — `0` disables escalation entirely
 - `no_penalty_mode`: currently informational only — there is no "behind schedule" red styling anywhere to suppress in the first place (by design), so this flag has no functional branch yet in `plan.html`
+- `main_goal_amount`: optional long-term net worth target (e.g. ₹1 Cr = `10000000`) shown as its own progress card on `/plan` with two ETAs (see "Main Goal" below). `None`/absent hides the card entirely — this is the only plan field where `0` is treated as "unset" rather than a real value (`api_update_plan_config()` normalizes `0`/`''`/`null` to `None`)
 
 ### `plan.py` — pure functions (no Flask import, unit-tested in `tests/test_plan.py`)
 
@@ -785,6 +787,9 @@ Dashboard load → snapshot_networth_if_needed() → networth_history.json (once
 | `this_month_target` / `this_month_actual` | Current calendar month only, for the "This Month" progress bars — intentionally *not* gated by completion, since that section is meant to show live in-progress status |
 | `months_contributed(transactions, plan, as_of_date)` | `(N, M)` — completed months with ≥1 tagged contribution, out of total completed months |
 | `trajectory(plan, as_of_date, baseline_networth)` | `[(month_key, projected_networth), ...]` over `completed_month_offsets` only |
+| `average_monthly_growth(actual_series)` | Real net worth change per elapsed **calendar month** between the first and last point of `actual_series` (`[(month_key, value), ...]`) — uses the month-key gap, not `len(series) - 1`, so a gap in `networth_history.json` (dashboard not opened for a month) doesn't overstate the rate. `None` with < 2 points |
+| `linear_eta_month_key(current_value, goal, monthly_growth, as_of_date)` | Month key by which `current_value` reaches `goal`, extrapolating `monthly_growth` linearly forward. `None` if `monthly_growth <= 0` or missing — a flat/declining pace has no honest ETA |
+| `theoretical_eta_month_key(plan, current_value, goal, as_of_date, max_months=1200)` | Month key by which `current_value` reaches `goal` if every future `monthly_target()` is hit exactly, continuing from the month after `as_of_date`. `None` if the plan's targets sum to `<= 0` (can never get there this way) |
 
 **Why `completed_month_offsets` exists:** an earlier version summed over `elapsed_month_offsets` (including the current month) everywhere, so a brand-new plan — or a `plan_start_date` change to today — instantly showed a full month's target as "already due" and the trajectory chart showed projected net worth jumping ahead of actual by a full month's contribution, before any time had passed to act on it. Fixed by excluding the in-progress month from every target/projection calc; `cumulative_actual` and `this_month_*` were left untouched since they reflect real, live data rather than a target/goal.
 
@@ -797,6 +802,15 @@ Dashboard load → snapshot_networth_if_needed() → networth_history.json (once
 - Written by `snapshot_networth_if_needed()` (app.py, called from the `/dashboard` route) — one entry per calendar month, computed via `compute_net_worth()` (savings + live investment/FD values − CC debt, same formula as the dashboard's client-side `renderNetWorth()`, but server-side so it's usable outside a browser session)
 - Idempotent — does nothing if the current month's key already exists
 - No backfill: history only starts accumulating from whenever a dashboard load first happens after this feature shipped. The trajectory chart's "actual" line is only as long as this file's history.
+
+### Main Goal (`plan_page()` in app.py + `main_goal_amount`)
+
+A single long-term net worth target, separate from the per-bucket plan and from the Dashboard's auto-advancing `nw_goal_increment` milestone — this one is a fixed number (e.g. ₹1 Cr), not an incrementing one, and lives on `/plan` rather than `/dashboard`.
+
+- **`current_net_worth`**: `full_actual_series[-1][1]` — the latest entry across the **entire** `networth_history.json` (not scoped to `plan_start_date`, unlike `actual_series` used for the trajectory chart), since net worth history predates and outlives any one plan config. Falls back to a live `compute_net_worth()` call only when there's no history at all yet.
+- Two ETAs computed server-side (`plan_lib.average_monthly_growth` / `linear_eta_month_key` / `theoretical_eta_month_key`) and passed as month-key strings (`actual_eta`, `theoretical_eta`) or `None`: one from real historical pace, one from continuing the plan's own monthly targets. They're expected to disagree — that's informative, not a bug.
+- `plan.html`'s `renderMainGoal()` does the month-key → "Mon YYYY" label and months-away arithmetic client-side (`monthKeyToLabel()`, `monthsBetweenKeys()`) — the Python side only ever returns month keys, never pre-formatted display strings.
+- Card is entirely absent from the DOM (`{% if main_goal_amount %}`) when unset, not just visually hidden — consistent with `fun_fund_balance`'s pattern elsewhere on this page.
 
 ### `/plan` route pre-existing-plan handling
 

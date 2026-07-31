@@ -58,6 +58,7 @@ Expense Manager is a single-user, self-hosted web app for tracking personal fina
 | **Fixed deposits** | Compound interest calculation with maturity countdown |
 | **Net worth** | Savings + investments - CC debt, with configurable milestone goals and progress bar |
 | **Plan vs. Actual** | Define a monthly bucket allocation plan, tag contributions, and track target vs. actual — read-only, no auto-debit, no penalties for skipped months. Headline "₹X ahead/behind plan" stat, per-bucket target-met state, and a Δ column on the cumulative table |
+| **Main Goal** | Optional fixed net worth target (e.g. ₹1 Cr) with a progress bar and two ETAs — one from your actual savings pace, one from the plan's own targets |
 
 ### Quality of Life
 
@@ -168,8 +169,10 @@ A read-only progress view for a monthly allocation plan (e.g. "₹60k to equity,
 1. **Settings → Investment Plan** — set a start date, monthly base amount, an optional Phase 1 (emergency-fund) target, and your buckets. Each bucket can optionally link to an account so its contributions get pre-tagged automatically.
 2. On **Manage**, when adding an Income transaction (or a Transfer with a bucket-linked destination account) to a bucket-linked account — or a Fixed Deposit account for the `fd_topup` bucket — a **Plan Bucket** dropdown appears and pre-selects the matching bucket. Override or clear it as needed.
 3. Untagged transactions are unaffected everywhere else in the app (dashboard, analytics, net worth) — tagging is purely additive.
+4. *(optional)* Set a **Main Goal** (e.g. `10000000` for ₹1 Cr) in the same Settings section to get a progress bar and ETA on the Plan page. Leave it blank to skip.
 
 ### `/plan` Page
+- **Main Goal** *(if set)* — progress toward your target net worth, plus two ETAs side by side: one from your actual savings pace (real net worth history), one from continuing this plan's own monthly targets. They'll often disagree — that's the point, not a bug.
 - **Ahead/behind plan** — a headline stat comparing your latest real net worth snapshot against what the plan projected for that same month, so the page states the answer instead of making you eyeball two chart lines
 - **This month** — a progress bar per bucket (actual vs. target for the current calendar month), with a distinct "✓ Target met" state once a bucket hits its goal
 - **Since plan start** — cumulative target vs. actual per bucket plus a Δ (delta) column, and "contributed in N of M months" (a completed month only counts once it's actually over — a brand-new plan starts at zero, not a phantom month's worth of "already due")
@@ -180,6 +183,7 @@ A read-only progress view for a monthly allocation plan (e.g. "₹60k to equity,
 - FD top-up contributions don't need tagging at all — booking a new Fixed Deposit account (Accounts page) automatically counts toward the `fd_topup` bucket by its start date, since an FD's principal is set at account creation rather than via a transaction
 - Net worth is snapshotted once per calendar month (on dashboard load) into `data/networth_history.json` — the trajectory chart only has real data from whenever this feature was first used, no historical backfill
 - `exclude_from_networth_goal: true` on an account (e.g. a dedicated "fun fund" savings account) excludes it from the net-worth milestone bar specifically, while still counting normally everywhere else
+- The Main Goal is independent of the Dashboard's net worth milestone (which auto-advances by a fixed increment) — this one's a single fixed target with an ETA, and it uses your full net worth history regardless of when the current plan started
 
 ---
 
